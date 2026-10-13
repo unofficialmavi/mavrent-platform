@@ -1,0 +1,6 @@
+{
+  "name": "MavRent Platform",
+  "description": "Production-ready rental property management SaaS with multi-tenant architecture, automated rent engine, tenant portal, maintenance, receipts, and Gemini-powered Mav AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
