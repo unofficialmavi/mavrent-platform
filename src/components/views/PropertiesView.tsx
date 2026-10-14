@@ -17,11 +17,12 @@ import {
 } from 'lucide-react';
 import { useProperty } from '../../context/PropertyContext';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import { Property, Unit, UnitType, PropertyType } from '../../types';
 
 export const PropertiesView: React.FC = () => {
   const { currentUser } = useAuth();
-  const { properties, addProperty, deleteProperty, addUnit, deleteUnit, updateUnitListingStatus } = useProperty();
+  const { properties, addProperty, deleteProperty, addUnit, deleteUnit, updateUnitListingStatus, refreshPortfolio } = useProperty();
 
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>(
     properties[0]?.id || ''
@@ -35,6 +36,8 @@ export const PropertiesView: React.FC = () => {
   const [unitError, setUnitError] = useState('');
   const [submittingProp, setSubmittingProp] = useState(false);
   const [submittingUnit, setSubmittingUnit] = useState(false);
+  const [mediaUploadingUnitId, setMediaUploadingUnitId] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState('');
 
   // New Property Form State
   const [newPropName, setNewPropName] = useState('');
@@ -113,6 +116,60 @@ export const PropertiesView: React.FC = () => {
     }
   };
 
+  const handleUploadListingMedia = async (unit: Unit, filesInput: FileList | null) => {
+    if (!selectedProperty || !currentUser) {
+      setMediaError('Please sign in with your landlord account before uploading listing media.');
+      return;
+    }
+    const files = Array.from(filesInput || []);
+    if (!files.length) return;
+    if (files.length > 5) {
+      setMediaError('Choose up to 5 photos or videos at a time.');
+      return;
+    }
+    const oversized = files.find((file) => file.size > 50 * 1024 * 1024);
+    if (oversized) {
+      setMediaError('Each photo or video must be 50 MB or smaller.');
+      return;
+    }
+    if (files.some((file) => !file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
+      setMediaError('Only image and video files are supported.');
+      return;
+    }
+    if (!supabase) {
+      setMediaError('The media service is not configured. Please contact support.');
+      return;
+    }
+
+    setMediaError('');
+    setMediaUploadingUnitId(unit.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Your session expired. Please sign in again.');
+      for (const file of files) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const objectPath = `${selectedProperty.id}/${unit.id}/${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage.from('rental-listing-media').upload(objectPath, file, {
+          contentType: file.type,
+          upsert: false,
+        });
+        if (uploadError) throw new Error(uploadError.message);
+        const response = await fetch(`/api/data/units/${unit.id}/media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ objectPath, mediaType: file.type.startsWith('video/') ? 'video' : 'image' }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not save listing media details.');
+      }
+      await refreshPortfolio();
+    } catch (err: any) {
+      setMediaError(err?.message || 'Unable to upload listing media.');
+    } finally {
+      setMediaUploadingUnitId(null);
+    }
+  };
+
   const handleListingStatus = async (unit: Unit) => {
     if (!selectedProperty) return;
     setUnitError('');
@@ -151,6 +208,8 @@ export const PropertiesView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {mediaError && <div className="rounded-xl border border-rose-500/30 bg-rose-950/20 px-4 py-3 text-xs text-rose-200">{mediaError}</div>}
 
       {/* Property Selector Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
@@ -341,8 +400,12 @@ export const PropertiesView: React.FC = () => {
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-800/80 pt-3">
+                  <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-2 text-[10px] font-bold text-slate-200 transition hover:bg-slate-800 ${mediaUploadingUnitId === unit.id ? 'pointer-events-none opacity-50' : ''}`}>
+                    {mediaUploadingUnitId === unit.id ? 'Uploading…' : 'Add photos / video'}
+                    <input type="file" accept="image/*,video/*" multiple className="hidden" disabled={mediaUploadingUnitId === unit.id} onChange={(e) => { void handleUploadListingMedia(unit, e.currentTarget.files); e.currentTarget.value = ''; }} />
+                  </label>
                   <button
-                    onClick={() => void handleListingStatus(unit)}
+                    onClick={() => void handleListingStatus(unit)
                     disabled={unit.status !== 'available' && unit.listingStatus !== 'published'}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-[10px] font-bold text-blue-200 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
                     title={unit.status !== 'available' ? 'Only available units can be published' : 'Update marketplace visibility'}
