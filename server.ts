@@ -1984,14 +1984,36 @@ app.post('/api/payments/webhook/mobile-money', async (req, res) => {
   }
 });
 
-// Create Maintenance Request in live Supabase
+// Create Maintenance Request in live Supabase with tenant/property authorization.
 app.post('/api/data/maintenance', async (req, res) => {
   try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
-    const { propertyId, unitId, tenantId, title, description, category, priority, mediaUrls } = req.body;
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in to submit a maintenance report.' });
 
-    if (!propertyId || !unitId || !title || !description) {
-      return res.status(400).json({ error: 'Missing required maintenance request fields' });
+    const { propertyId, unitId, tenantId, title, description, category, priority, mediaUrls } = req.body;
+    if (!propertyId || !unitId || !tenantId || !title || !description) {
+      return res.status(400).json({ error: 'Property, unit, tenant, title, and description are required.' });
+    }
+    if (!Array.isArray(mediaUrls || [])) return res.status(400).json({ error: 'Attachments must be a list of uploaded media paths.' });
+    if ((mediaUrls || []).length > 5) return res.status(400).json({ error: 'A report can include at most 5 attachments.' });
+    if ((mediaUrls || []).some((item: unknown) => typeof item !== 'string' || !item.startsWith(`${propertyId}/${user.id}/`))) {
+      return res.status(400).json({ error: 'One or more attachments do not belong to your account and property.' });
+    }
+
+    const [{ data: tenant, error: tenantError }, { data: property, error: propertyError }] = await Promise.all([
+      supabaseAdmin.from('tenants').select('id,property_id,unit_id,user_id,status').eq('id', tenantId).maybeSingle(),
+      supabaseAdmin.from('properties').select('id,owner_id,landlord_id').eq('id', propertyId).maybeSingle(),
+    ]);
+    if (tenantError || propertyError) return res.status(503).json({ error: 'The management database is not ready. Please contact the platform administrator.' });
+    if (!tenant || !property || tenant.property_id !== propertyId || tenant.unit_id !== unitId) {
+      return res.status(400).json({ error: 'The selected tenant, unit, and property do not match.' });
+    }
+
+    const isOwner = property.owner_id === user.id || property.landlord_id === user.id;
+    const isLinkedTenant = tenant.user_id === user.id && tenant.status === 'active';
+    if (!isOwner && !isLinkedTenant) {
+      return res.status(403).json({ error: 'You are not authorized to report maintenance for this tenancy.' });
     }
 
     const { data, error } = await supabaseAdmin
@@ -2000,8 +2022,8 @@ app.post('/api/data/maintenance', async (req, res) => {
         property_id: propertyId,
         unit_id: unitId,
         tenant_id: tenantId,
-        title,
-        description,
+        title: String(title).trim(),
+        description: String(description).trim(),
         category: category || 'other',
         priority: priority || 'medium',
         status: 'pending',
@@ -2011,18 +2033,35 @@ app.post('/api/data/maintenance', async (req, res) => {
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true, maintenanceRequest: data });
+    return res.json({ success: true, maintenanceRequest: data });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'Failed to submit maintenance request.' });
   }
 });
 
-// Update Maintenance Status
+// Update Maintenance Status. Only the property's owner/manager may change ticket status.
 app.patch('/api/data/maintenance/:id', async (req, res) => {
   try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+
     const { id } = req.params;
     const { status, landlordNotes, assignedWorker } = req.body;
+    const allowedStatuses = ['pending', 'acknowledged', 'in_progress', 'completed', 'rejected', 'cancelled'];
+    if (status && !allowedStatuses.includes(status)) return res.status(400).json({ error: 'Invalid maintenance status.' });
+
+    const { data: ticket, error: ticketError } = await supabaseAdmin
+      .from('maintenance_requests').select('id,property_id').eq('id', id).maybeSingle();
+    if (ticketError) return res.status(503).json({ error: 'Maintenance database is not ready.' });
+    if (!ticket) return res.status(404).json({ error: 'Maintenance request not found.' });
+
+    const { data: property, error: propertyError } = await supabaseAdmin
+      .from('properties').select('owner_id,landlord_id').eq('id', ticket.property_id).maybeSingle();
+    if (propertyError) return res.status(503).json({ error: 'Property database is not ready.' });
+    if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
+      return res.status(403).json({ error: 'Only the property's landlord or manager can update this request.' });
+    }
 
     const { data, error } = await supabaseAdmin
       .from('maintenance_requests')
@@ -2037,104 +2076,13 @@ app.patch('/api/data/maintenance/:id', async (req, res) => {
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true, maintenanceRequest: data });
+    return res.json({ success: true, maintenanceRequest: data });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message || 'Failed to update maintenance request.' });
   }
 });
 
 // Create Expense in live Supabase
-app.post('/api/data/expenses', async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
-    const user = await getAuthenticatedUser(req);
-    const { propertyId, unitId, amount, category, expenseDate, description, receiptAttachment } = req.body;
-
-    if (!propertyId || !amount || !description) {
-      return res.status(400).json({ error: 'propertyId, amount, and description are required' });
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('expenses')
-      .insert({
-        property_id: propertyId,
-        unit_id: unitId || null,
-        amount: Number(amount),
-        category: category || 'other',
-        expense_date: expenseDate || new Date().toISOString().split('T')[0],
-        description,
-        receipt_attachment: receiptAttachment || null,
-        created_by: user?.id || null,
-      })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true, expense: data });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete Expense
-app.delete('/api/data/expenses/:id', async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
-    const { id } = req.params;
-    const { error } = await supabaseAdmin.from('expenses').delete().eq('id', id);
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true, message: 'Expense deleted successfully' });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Mark Notification Read
-app.patch('/api/data/notifications/:id/read', async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
-    const { id } = req.params;
-    const { error } = await supabaseAdmin
-      .from('notifications')
-      .update({ read: true })
-      .eq('id', id);
-
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Send Notification
-app.post('/api/data/notifications', async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase not configured.' });
-    const { userId, title, message, channel, type } = req.body;
-    if (!userId || !title || !message) {
-      return res.status(400).json({ error: 'userId, title, and message are required' });
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('notifications')
-      .insert({
-        user_id: userId,
-        title,
-        message,
-        channel: channel || 'in_app',
-        read: false,
-        notification_type: type || 'system',
-      })
-      .select()
-      .single();
-
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true, notification: data });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Mav AI Chat and Action Engine (Server-Side)
 app.post('/api/gemini/chat', async (req, res) => {
   try {
