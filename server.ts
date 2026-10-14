@@ -249,7 +249,7 @@ app.get('/api/marketplace/listings', async (_req, res) => {
       return res.status(500).json({ success: false, error: 'Unable to load available rentals.' });
     }
 
-    const rows = units || [];
+    const rows = (units || []).filter((unit: any) => !unit.occupancy_status || unit.occupancy_status === 'available');
     const propertyIds = [...new Set(rows.map((unit: any) => unit.property_id).filter(Boolean))];
     if (!propertyIds.length) return res.json({ success: true, listings: [] });
 
