@@ -32,7 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (session?.user && isMounted) {
             const user = session.user;
             // Fetch profile record from Supabase
-            let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : user.user_metadata?.role === 'property_manager' ? 'property_manager' : user.user_metadata?.role === 'admin' ? 'admin' : 'landlord';
+            let mappedRole: UserRole = 'landlord';
             let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
             let phone = user.phone || '';
             let tenantCode = user.user_metadata?.tenant_code;
@@ -83,7 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user && isMounted) {
           const user = session.user;
-          let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : user.user_metadata?.role === 'property_manager' ? 'property_manager' : user.user_metadata?.role === 'admin' ? 'admin' : 'landlord';
+          let mappedRole: UserRole = 'landlord';
           let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
           let phone = user.phone || '';
           let tenantCode = user.user_metadata?.tenant_code;
