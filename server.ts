@@ -297,6 +297,54 @@ app.get('/api/marketplace/listings', async (_req, res) => {
   }
 });
 
+// Public marketplace inquiry and viewing-request endpoints.
+app.post('/api/marketplace/inquiries', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Marketplace is temporarily unavailable.' });
+    const { unitId, name, phone, email, message } = req.body;
+    if (!unitId || !name || !phone || !email) {
+      return res.status(400).json({ success: false, error: 'Rental, name, phone, and email are required.' });
+    }
+    const { data: unit, error: unitError } = await supabaseAdmin.from('units').select('id,status').eq('id', unitId).maybeSingle();
+    if (unitError) return res.status(503).json({ success: false, error: 'Marketplace data is not ready.' });
+    if (!unit || unit.status !== 'published') return res.status(404).json({ success: false, error: 'This rental listing is no longer available.' });
+    const user = await getAuthenticatedUser(req);
+    const { data, error } = await supabaseAdmin.from('inquiries').insert({
+      unit_id: unitId, renter_id: user?.id || null, name: String(name).trim(),
+      phone: String(phone).trim(), email: String(email).trim().toLowerCase(),
+      message: String(message || '').trim() || null, status: 'new',
+    }).select('id,status,created_at').single();
+    if (error) return res.status(400).json({ success: false, error: error.message });
+    return res.json({ success: true, inquiry: data, message: 'Your inquiry has been sent to the property manager.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Could not submit your inquiry.' });
+  }
+});
+
+app.post('/api/marketplace/viewings', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Marketplace is temporarily unavailable.' });
+    const { unitId, name, phone, email, preferredDate, preferredTime, note } = req.body;
+    if (!unitId || !name || !phone || !email || !preferredDate || !preferredTime) {
+      return res.status(400).json({ success: false, error: 'Rental, contact details, preferred date, and time are required.' });
+    }
+    const { data: unit, error: unitError } = await supabaseAdmin.from('units').select('id,status').eq('id', unitId).maybeSingle();
+    if (unitError) return res.status(503).json({ success: false, error: 'Marketplace data is not ready.' });
+    if (!unit || unit.status !== 'published') return res.status(404).json({ success: false, error: 'This rental listing is no longer available.' });
+    const user = await getAuthenticatedUser(req);
+    const { data, error } = await supabaseAdmin.from('viewing_requests').insert({
+      unit_id: unitId, renter_id: user?.id || null,
+      preferred_date: preferredDate, preferred_time: String(preferredTime).trim(),
+      note: [`Name: ${String(name).trim()}`, `Phone: ${String(phone).trim()}`, `Email: ${String(email).trim().toLowerCase()}`, String(note || '').trim()].filter(Boolean).join(' | '),
+      status: 'requested',
+    }).select('id,status,created_at').single();
+    if (error) return res.status(400).json({ success: false, error: error.message });
+    return res.json({ success: true, viewing: data, message: 'Your viewing request has been sent to the property manager.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Could not submit your viewing request.' });
+  }
+});
+
 // =========================================================================
 // REAL-TIME DATA & PORTFOLIO ROUTES (Connected to Live Supabase Database)
 // =========================================================================
