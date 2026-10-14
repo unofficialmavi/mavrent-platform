@@ -8,6 +8,7 @@ import { ReceiptModal } from './components/common/ReceiptModal';
 import { SupabaseSetupModal } from './components/common/SupabaseSetupModal';
 import { MavAiDrawer } from './components/ai/MavAiDrawer';
 import { AuthModal } from './components/auth/AuthModal';
+import { MarketplaceView } from './components/marketplace/MarketplaceView';
 
 // Views
 import { LandlordDashboard } from './components/dashboard/LandlordDashboard';
@@ -48,6 +49,32 @@ const MainApp: React.FC = () => {
   const handleOpenAddProperty = () => {
     setActiveTab('properties');
   };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-700 shadow-lg shadow-blue-500/25">
+                <span className="font-mono text-xl font-black text-white">M</span>
+              </div>
+              <div>
+                <div className="text-lg font-extrabold tracking-tight text-white">MavRent <span className="text-blue-400">PRO</span></div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Rentals made easier</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowAuthModal(true)} className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-bold text-slate-200 transition hover:bg-slate-800">Sign in</button>
+              <button onClick={() => setShowAuthModal(true)} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500">Get started</button>
+            </div>
+          </div>
+        </header>
+        <MarketplaceView onSignIn={() => setShowAuthModal(true)} />
+        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-blue-600 selection:text-white">
