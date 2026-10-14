@@ -2083,6 +2083,97 @@ app.patch('/api/data/maintenance/:id', async (req, res) => {
 });
 
 // Create Expense in live Supabase
+// Create Expense in live Supabase (landlord-only).
+app.post('/api/data/expenses', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    const { propertyId, unitId, amount, category, expenseDate, description, receiptAttachment } = req.body;
+    if (!propertyId || !Number.isFinite(Number(amount)) || Number(amount) <= 0 || !description) {
+      return res.status(400).json({ error: 'Property, positive amount, and description are required.' });
+    }
+    const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', propertyId).maybeSingle();
+    if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
+      return res.status(403).json({ error: 'Only the property's landlord or manager can record expenses.' });
+    }
+    const { data, error } = await supabaseAdmin.from('expenses').insert({
+      property_id: propertyId, unit_id: unitId || null, amount: Number(amount),
+      category: category || 'other', expense_date: expenseDate || new Date().toISOString().slice(0, 10),
+      description: String(description).trim(), receipt_attachment: receiptAttachment || null, created_by: user.id,
+    }).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true, expense: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to create expense.' });
+  }
+});
+
+// Delete Expense (landlord-only).
+app.delete('/api/data/expenses/:id', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    const { id } = req.params;
+    const { data: expense } = await supabaseAdmin.from('expenses').select('id,property_id').eq('id', id).maybeSingle();
+    if (!expense) return res.status(404).json({ error: 'Expense not found.' });
+    const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', expense.property_id).maybeSingle();
+    if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
+      return res.status(403).json({ error: 'Only the property's landlord or manager can delete expenses.' });
+    }
+    const { error } = await supabaseAdmin.from('expenses').delete().eq('id', id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to delete expense.' });
+  }
+});
+
+// Mark the signed-in user's own notification as read.
+app.patch('/api/data/notifications/:id/read', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.from('notifications').update({ read: true }).eq('id', id).eq('user_id', user.id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to update notification.' });
+  }
+});
+
+// Send an in-app notification to the landlord's linked tenant only.
+app.post('/api/data/notifications', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    const { userId, title, message, channel, type } = req.body;
+    if (!userId || !title || !message) return res.status(400).json({ error: 'Recipient, title, and message are required.' });
+
+    if (userId !== user.id) {
+      const { data: tenantRows, error: tenantError } = await supabaseAdmin.from('tenants').select('property_id').eq('user_id', userId).eq('status', 'active');
+      if (tenantError) return res.status(503).json({ error: 'Tenant records are not available.' });
+      const propertyIds = (tenantRows || []).map((t: any) => t.property_id);
+      if (!propertyIds.length) return res.status(403).json({ error: 'You cannot send notifications to this account.' });
+      const { data: ownedProperties } = await supabaseAdmin.from('properties').select('id').in('id', propertyIds).or(`owner_id.eq.${user.id},landlord_id.eq.${user.id}`);
+      if (!ownedProperties?.length) return res.status(403).json({ error: 'You cannot send notifications to this account.' });
+    }
+
+    const { data, error } = await supabaseAdmin.from('notifications').insert({
+      user_id: userId, title: String(title).trim(), message: String(message).trim(),
+      channel: channel || 'in_app', read: false, notification_type: type || 'system',
+    }).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true, notification: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to send notification.' });
+  }
+});
+
 // Mav AI Chat and Action Engine (Server-Side)
 app.post('/api/gemini/chat', async (req, res) => {
   try {
