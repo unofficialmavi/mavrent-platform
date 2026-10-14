@@ -96,7 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           let mappedRole: UserRole = 'landlord';
           let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
           let phone = user.phone || '';
-          let tenantCode = user.user_metadata?.tenant_code;
+          let tenantCode: string | undefined;
 
           if (supabase) {
             try {
