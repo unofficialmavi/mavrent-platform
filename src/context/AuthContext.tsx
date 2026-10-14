@@ -9,43 +9,13 @@ interface AuthContextType {
   login: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   register: (data: { email: string; fullName: string; role: UserRole; phone: string; password?: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  switchRole: (role: UserRole) => void;
   updateProfile: (updates: Partial<UserProfile>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DEFAULT_LANDLORD: UserProfile = {
-  id: 'usr-landlord-001',
-  role: 'landlord',
-  fullName: 'Eng. Patrick Kato',
-  phone: '+256 772 123 456',
-  email: 'landlord@mavrent.com',
-  createdAt: '2026-01-15T08:00:00Z',
-};
-
-const DEFAULT_TENANT: UserProfile = {
-  id: 'usr-tenant-001',
-  role: 'tenant',
-  fullName: 'Grace Nakato',
-  phone: '+256 701 987 654',
-  email: 'grace@example.com',
-  tenantCode: 'MVR-88219K',
-  createdAt: '2026-02-01T10:00:00Z',
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('mavrent_current_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return DEFAULT_LANDLORD;
-      }
-    }
-    return DEFAULT_LANDLORD;
-  });
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -62,7 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (session?.user && isMounted) {
             const user = session.user;
             // Fetch profile record from Supabase
-            let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : 'landlord';
+            let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : user.user_metadata?.role === 'property_manager' ? 'property_manager' : user.user_metadata?.role === 'admin' ? 'admin' : 'landlord';
             let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
             let phone = user.phone || '';
             let tenantCode = user.user_metadata?.tenant_code;
@@ -71,13 +41,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
               if (prof) {
                 if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
+                else if (prof.role === 'agent') mappedRole = 'property_manager';
+                else if (prof.role === 'admin') mappedRole = 'admin';
+                else if (prof.role === 'landlord') mappedRole = 'landlord';
                 if (prof.full_name) fullName = prof.full_name;
                 if (prof.phone) phone = prof.phone;
                 if (prof.tenant_code) tenantCode = prof.tenant_code;
               }
 
               if (mappedRole === 'tenant' && !tenantCode) {
-                const { data: ten } = await supabase.from('tenants').select('tenant_code').or(`user_id.eq.${user.id},email.eq.${user.email}`).limit(1).maybeSingle();
+                const { data: ten } = await supabase.from('tenants').select('tenant_code').eq('user_id', user.id).limit(1).maybeSingle();
                 if (ten?.tenant_code) tenantCode = ten.tenant_code;
               }
             } catch (pErr) {
@@ -110,7 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user && isMounted) {
           const user = session.user;
-          let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : 'landlord';
+          let mappedRole: UserRole = user.user_metadata?.role === 'tenant' ? 'tenant' : user.user_metadata?.role === 'property_manager' ? 'property_manager' : user.user_metadata?.role === 'admin' ? 'admin' : 'landlord';
           let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
           let phone = user.phone || '';
           let tenantCode = user.user_metadata?.tenant_code;
@@ -120,6 +93,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
               if (prof) {
                 if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
+                else if (prof.role === 'agent') mappedRole = 'property_manager';
+                else if (prof.role === 'admin') mappedRole = 'admin';
+                else if (prof.role === 'landlord') mappedRole = 'landlord';
                 if (prof.full_name) fullName = prof.full_name;
                 if (prof.phone) phone = prof.phone;
                 if (prof.tenant_code) tenantCode = prof.tenant_code;
@@ -193,21 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true };
       }
 
-      // Quick local test login fallback
-      let user: UserProfile = DEFAULT_LANDLORD;
-      if (email.toLowerCase().includes('tenant') || email.toLowerCase().includes('grace')) {
-        user = DEFAULT_TENANT;
-      } else {
-        user = {
-          ...DEFAULT_LANDLORD,
-          email,
-          fullName: email.split('@')[0].toUpperCase(),
-        };
-      }
-      setCurrentUser(user);
-      localStorage.setItem('mavrent_current_user', JSON.stringify(user));
-      setIsLoading(false);
-      return { success: true };
+      return { success: false, error: 'Enter your password to sign in with your registered MavRent account.' };
     } catch (err: any) {
       setIsLoading(false);
       return { success: false, error: err.message || 'Login failed' };
@@ -248,19 +210,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true };
       }
 
-      // Fallback
-      const newUser: UserProfile = {
-        id: `usr-${Date.now()}`,
-        role: data.role,
-        fullName: data.fullName,
-        phone: data.phone,
-        email: data.email,
-        createdAt: new Date().toISOString(),
-      };
-      setCurrentUser(newUser);
-      localStorage.setItem('mavrent_current_user', JSON.stringify(newUser));
-      setIsLoading(false);
-      return { success: true };
+      return { success: false, error: 'A password is required to create a secure account.' };
     } catch (err: any) {
       setIsLoading(false);
       return { success: false, error: err.message || 'Registration failed' };
@@ -275,18 +225,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('mavrent_current_user');
   };
 
-  const switchRole = (newRole: UserRole) => {
-    if (newRole === 'tenant') {
-      setCurrentUser(DEFAULT_TENANT);
-      localStorage.setItem('mavrent_current_user', JSON.stringify(DEFAULT_TENANT));
-    } else {
-      setCurrentUser({
-        ...DEFAULT_LANDLORD,
-        role: newRole,
-      });
-      localStorage.setItem('mavrent_current_user', JSON.stringify({ ...DEFAULT_LANDLORD, role: newRole }));
-    }
-  };
 
   const updateProfile = (updates: Partial<UserProfile>) => {
     if (!currentUser) return;
@@ -304,7 +242,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        switchRole,
         updateProfile,
       }}
     >
