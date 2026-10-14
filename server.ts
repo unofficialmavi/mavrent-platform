@@ -2192,4 +2192,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Vercel imports this Express app as a serverless function. Do not start a
+// separate listening server inside the function runtime.
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
+
+export default app;
