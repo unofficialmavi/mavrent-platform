@@ -67,7 +67,7 @@ export const MaintenanceView: React.FC = () => {
       const unique = [...new Set(entries)];
       const resolved: Record<string, string> = {};
       for (const path of unique) {
-        if (/^https?:\\/\\//i.test(path)) {
+        if (/^https?:\/\//i.test(path)) {
           resolved[path] = path;
           continue;
         }
@@ -259,7 +259,7 @@ export const MaintenanceView: React.FC = () => {
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {ticket.mediaUrls.slice(0, 4).map((path) => {
                     const src = resolvedMedia[path];
-                    const isVideo = /\\.(mp4|mov|webm|m4v)(?:$|\\?)/i.test(path);
+                    const isVideo = /\.(mp4|mov|webm|m4v)(?:$|\?)/i.test(path);
                     return (
                       <div key={path} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
                         {src ? (isVideo
