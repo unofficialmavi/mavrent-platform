@@ -1,0 +1,9 @@
+import app from '../server';
+
+// Normalize file-based Vercel function URLs before dispatching to Express.
+export function invokeExpress(req: any, res: any, routePath: string) {
+  const rawUrl = typeof req.url === 'string' ? req.url : '';
+  const query = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
+  req.url = routePath + query;
+  return app(req, res);
+}
