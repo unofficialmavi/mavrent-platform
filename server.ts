@@ -230,6 +230,73 @@ app.post('/api/auth/signin', async (req, res) => {
   }
 });
 
+// Public rental marketplace: only explicitly published listings are exposed.
+app.get('/api/marketplace/listings', async (_req, res) => {
+  try {
+    if (!supabaseAdmin) {
+      return res.status(503).json({ success: false, error: 'Marketplace is temporarily unavailable.' });
+    }
+
+    const { data: units, error: unitsError } = await supabaseAdmin
+      .from('units')
+      .select('*')
+      .eq('status', 'published')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (unitsError) {
+      console.error('Marketplace listings query failed:', unitsError);
+      return res.status(500).json({ success: false, error: 'Unable to load available rentals.' });
+    }
+
+    const rows = units || [];
+    const propertyIds = [...new Set(rows.map((unit: any) => unit.property_id).filter(Boolean))];
+    if (!propertyIds.length) return res.json({ success: true, listings: [] });
+
+    const [{ data: properties, error: propertiesError }, { data: media }] = await Promise.all([
+      supabaseAdmin.from('properties').select('id,name,description,address,area,district,city,country,property_type,cover_image_url').in('id', propertyIds),
+      supabaseAdmin.from('listing_media').select('unit_id,media_url,media_type,sort_order').in('unit_id', rows.map((unit: any) => unit.id)).order('sort_order', { ascending: true }),
+    ]);
+
+    if (propertiesError) {
+      console.error('Marketplace property query failed:', propertiesError);
+      return res.status(500).json({ success: false, error: 'Unable to load rental details.' });
+    }
+
+    const propertyMap = new Map((properties || []).map((property: any) => [property.id, property]));
+    const mediaMap = new Map<string, any[]>();
+    for (const item of media || []) {
+      const existing = mediaMap.get(item.unit_id) || [];
+      existing.push(item);
+      mediaMap.set(item.unit_id, existing);
+    }
+
+    const listings = rows
+      .map((unit: any) => ({
+        id: unit.id,
+        propertyId: unit.property_id,
+        title: unit.title || unit.unit_number || 'Rental unit',
+        description: unit.description || '',
+        unitType: unit.unit_type || 'room',
+        bedrooms: Number(unit.bedrooms || 0),
+        bathrooms: Number(unit.bathrooms || 1),
+        monthlyRent: Number(unit.monthly_rent || 0),
+        depositAmount: Number(unit.deposit_amount || 0),
+        currency: unit.currency || 'UGX',
+        furnished: Boolean(unit.furnished),
+        availableFrom: unit.available_from || null,
+        property: propertyMap.get(unit.property_id) || null,
+        media: mediaMap.get(unit.id) || [],
+      }))
+      .filter((listing: any) => listing.property !== null);
+
+    return res.json({ success: true, listings });
+  } catch (error: any) {
+    console.error('Marketplace listings error:', error);
+    return res.status(500).json({ success: false, error: 'Unable to load available rentals.' });
+  }
+});
+
 // =========================================================================
 // REAL-TIME DATA & PORTFOLIO ROUTES (Connected to Live Supabase Database)
 // =========================================================================
