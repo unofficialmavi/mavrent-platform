@@ -10,6 +10,30 @@ alter table public.properties add column if not exists currency text not null de
 alter table public.profiles add column if not exists tenant_code text;
 update public.properties set landlord_id = owner_id where landlord_id is null and owner_id is not null;
 
+-- Prevent a user from promoting their own profile or forging a tenant link.
+create or replace function public.prevent_profile_privilege_escalation()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $
+begin
+  if auth.uid() is not null and auth.uid() = old.id then
+    if new.role is distinct from old.role then
+      raise exception 'Profile role changes must be performed by the platform account service';
+    end if;
+    if new.tenant_code is distinct from old.tenant_code then
+      raise exception 'Tenant codes can only be assigned after verified lease linking';
+    end if;
+  end if;
+  return new;
+end;
+$;
+
+drop trigger if exists trg_prevent_profile_privilege_escalation on public.profiles;
+create trigger trg_prevent_profile_privilege_escalation
+before update on public.profiles
+for each row execute function public.prevent_profile_privilege_escalation();
+
 do $$
 begin
   if not exists (
@@ -248,14 +272,14 @@ using (exists (
 
 drop policy if exists "renters create inquiries" on public.inquiries;
 create policy "renters create inquiries" on public.inquiries for insert to anon, authenticated
-with check (exists (
+with check ((inquiries.renter_id is null or inquiries.renter_id = auth.uid()) and exists (
   select 1 from public.units u
   where u.id = inquiries.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
 ));
 
 drop policy if exists "renters create viewing requests" on public.viewing_requests;
 create policy "renters create viewing requests" on public.viewing_requests for insert to anon, authenticated
-with check (exists (
+with check ((viewing_requests.renter_id is null or viewing_requests.renter_id = auth.uid()) and exists (
   select 1 from public.units u
   where u.id = viewing_requests.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
 ));
