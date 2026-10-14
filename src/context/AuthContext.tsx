@@ -153,6 +153,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!res.ok || !json.success) {
           throw new Error(json.error || 'Invalid email or password');
         }
+        if (!json.profile) {
+          throw new Error('Your account profile is not set up yet. Please contact platform support.');
+        }
 
         // Store session in Supabase client if returned
         if (json.session && isSupabaseConfigured && supabase) {
