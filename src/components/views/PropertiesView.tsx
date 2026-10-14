@@ -12,6 +12,8 @@ import {
   Edit,
   Layers,
   AlertCircle,
+  Globe,
+  PauseCircle,
 } from 'lucide-react';
 import { useProperty } from '../../context/PropertyContext';
 import { useAuth } from '../../context/AuthContext';
@@ -19,7 +21,7 @@ import { Property, Unit, UnitType, PropertyType } from '../../types';
 
 export const PropertiesView: React.FC = () => {
   const { currentUser } = useAuth();
-  const { properties, addProperty, deleteProperty, addUnit, deleteUnit } = useProperty();
+  const { properties, addProperty, deleteProperty, addUnit, deleteUnit, updateUnitListingStatus } = useProperty();
 
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>(
     properties[0]?.id || ''
@@ -108,6 +110,16 @@ export const PropertiesView: React.FC = () => {
       setUnitError(err?.message || 'Unable to save unit. Please check your connection and try again.');
     } finally {
       setSubmittingUnit(false);
+    }
+  };
+
+  const handleListingStatus = async (unit: Unit) => {
+    if (!selectedProperty) return;
+    setUnitError('');
+    try {
+      await updateUnitListingStatus(selectedProperty.id, unit.id, unit.listingStatus === 'published' ? 'paused' : 'published');
+    } catch (err: any) {
+      setUnitError(err?.message || 'Could not update the marketplace listing.');
     }
   };
 
@@ -300,6 +312,13 @@ export const PropertiesView: React.FC = () => {
                   </span>
                 </div>
 
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Marketplace</span>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${unit.listingStatus === 'published' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : unit.listingStatus === 'paused' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>
+                    {unit.listingStatus || 'draft'}
+                  </span>
+                </div>
+
                 <div className="mt-4 space-y-2 border-t border-slate-800/80 pt-3 text-xs">
                   <div className="flex justify-between text-slate-300">
                     <span className="text-slate-500">Monthly Rent:</span>
@@ -321,7 +340,16 @@ export const PropertiesView: React.FC = () => {
                   )}
                 </div>
 
-                <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-800/80 pt-3">
+                <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-800/80 pt-3">
+                  <button
+                    onClick={() => void handleListingStatus(unit)}
+                    disabled={unit.status !== 'available' && unit.listingStatus !== 'published'}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-[10px] font-bold text-blue-200 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={unit.status !== 'available' ? 'Only available units can be published' : 'Update marketplace visibility'}
+                  >
+                    {unit.listingStatus === 'published' ? <PauseCircle className="h-3.5 w-3.5" /> : <Globe className="h-3.5 w-3.5" />}
+                    {unit.listingStatus === 'published' ? 'Pause listing' : 'Publish listing'}
+                  </button>
                   <button
                     onClick={() => deleteUnit(selectedProperty.id, unit.id)}
                     className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
