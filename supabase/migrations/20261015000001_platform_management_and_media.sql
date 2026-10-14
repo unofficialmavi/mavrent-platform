@@ -15,7 +15,7 @@ create or replace function public.prevent_profile_privilege_escalation()
 returns trigger
 language plpgsql
 set search_path = public, pg_temp
-as $
+as $profile_guard$
 begin
   if auth.uid() is not null and auth.uid() = old.id then
     if new.role is distinct from old.role then
@@ -27,7 +27,7 @@ begin
   end if;
   return new;
 end;
-$;
+$profile_guard$;
 
 drop trigger if exists trg_prevent_profile_privilege_escalation on public.profiles;
 create trigger trg_prevent_profile_privilege_escalation
