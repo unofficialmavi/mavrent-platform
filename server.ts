@@ -661,6 +661,41 @@ app.patch('/api/data/units/:id/listing-status', async (req, res) => {
   }
 });
 
+// Attach public marketplace media to a unit after a verified storage upload.
+app.post('/api/data/units/:id/media', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+    const { id } = req.params;
+    const { objectPath, mediaType } = req.body;
+    if (!objectPath || !['image', 'video'].includes(mediaType)) {
+      return res.status(400).json({ error: 'A media path and type (image or video) are required.' });
+    }
+    const { data: unit } = await supabaseAdmin.from('units').select('id,property_id').eq('id', id).maybeSingle();
+    if (!unit) return res.status(404).json({ error: 'Unit not found.' });
+    const expectedPrefix = `${unit.property_id}/${unit.id}/${user.id}/`;
+    if (typeof objectPath !== 'string' || !objectPath.startsWith(expectedPrefix)) {
+      return res.status(400).json({ error: 'The uploaded media path is invalid for this unit.' });
+    }
+    const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', unit.property_id).maybeSingle();
+    if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
+      return res.status(403).json({ error: 'Only the property's landlord or manager can add listing media.' });
+    }
+    const publicUrl = supabaseAdmin.storage.from('rental-listing-media').getPublicUrl(objectPath).data.publicUrl;
+    const { data, error } = await supabaseAdmin.from('listing_media').insert({
+      unit_id: unit.id,
+      media_url: publicUrl,
+      media_type: mediaType,
+      sort_order: 0,
+    }).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true, media: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Could not save listing media.' });
+  }
+});
+
 // Update property in live Supabase
 app.put('/api/data/properties/:id', async (req, res) => {
   try {
