@@ -42,6 +42,48 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ onSignIn }) =>
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [type, setType] = useState('all');
+  const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [requestType, setRequestType] = useState<'inquiry' | 'viewing'>('inquiry');
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [requestMessage, setRequestMessage] = useState('');
+  const [preferredDate, setPreferredDate] = useState('');
+  const [preferredTime, setPreferredTime] = useState('10:00');
+  const [requestError, setRequestError] = useState('');
+  const [requestSuccess, setRequestSuccess] = useState('');
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+
+  const submitRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedListing) return;
+    setRequestError('');
+    setRequestSuccess('');
+    setSubmittingRequest(true);
+    try {
+      const endpoint = requestType === 'inquiry' ? '/api/marketplace/inquiries' : '/api/marketplace/viewings';
+      const payload = requestType === 'inquiry'
+        ? { unitId: selectedListing.id, name: contactName, phone: contactPhone, email: contactEmail, message: requestMessage }
+        : { unitId: selectedListing.id, name: contactName, phone: contactPhone, email: contactEmail, preferredDate, preferredTime, note: requestMessage };
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Your request could not be sent.');
+      setRequestSuccess(result.message || 'Your request has been sent.');
+      setContactName('');
+      setContactPhone('');
+      setContactEmail('');
+      setRequestMessage('');
+      setPreferredDate('');
+    } catch (err: any) {
+      setRequestError(err?.message || 'Your request could not be sent. Please try again.');
+    } finally {
+      setSubmittingRequest(false);
+    }
+  };
 
   const loadListings = async () => {
     setLoading(true);
@@ -164,7 +206,10 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ onSignIn }) =>
                       <span className="inline-flex items-center gap-1.5"><Bath className="h-4 w-4" />{listing.bathrooms} bath</span>
                       {listing.furnished && <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-300">Furnished</span>}
                     </div>
-                    <button onClick={onSignIn} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-2.5 text-xs font-bold text-blue-200 transition hover:bg-blue-600 hover:text-white">Inquire / request viewing <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                    <div className="mt-5 grid grid-cols-2 gap-2">
+                      <button onClick={() => { setSelectedListing(listing); setRequestType('inquiry'); setRequestError(''); setRequestSuccess(''); }} className="flex items-center justify-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2.5 text-xs font-bold text-blue-200 transition hover:bg-blue-600 hover:text-white">Inquire <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => { setSelectedListing(listing); setRequestType('viewing'); setRequestError(''); setRequestSuccess(''); }} className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-blue-500">Request viewing</button>
+                    </div>
                   </div>
                 </article>
               );
@@ -173,6 +218,50 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ onSignIn }) =>
         )}
       </section>
 
+      {selectedListing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-md">
+          <div className="my-6 w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 text-slate-100 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-300">{requestType === 'inquiry' ? 'Rental inquiry' : 'Viewing request'}</p>
+                <h3 className="mt-1 text-lg font-bold text-white">{selectedListing.title}</h3>
+                <p className="mt-1 text-xs text-slate-400">{selectedListing.property?.name} · {selectedListing.property?.city || 'Uganda'}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedListing(null)} className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800">Close</button>
+            </div>
+            <p className="mt-4 text-xs leading-5 text-slate-400">Your contact details will be shared with the property manager for this listing.</p>
+            {requestError && <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-950/30 p-3 text-xs text-rose-200">{requestError}</div>}
+            {requestSuccess && <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-950/30 p-3 text-xs text-emerald-200">{requestSuccess}</div>}
+            <form onSubmit={submitRequest} className="mt-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-semibold text-slate-300">Full name
+                  <input required value={contactName} onChange={(e) => setContactName(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" placeholder="Your name" />
+                </label>
+                <label className="text-xs font-semibold text-slate-300">Phone number
+                  <input required type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" placeholder="+256 ..." />
+                </label>
+              </div>
+              <label className="block text-xs font-semibold text-slate-300">Email address
+                <input required type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" placeholder="you@example.com" />
+              </label>
+              {requestType === 'viewing' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-semibold text-slate-300">Preferred date
+                    <input required type="date" min={new Date().toISOString().slice(0, 10)} value={preferredDate} onChange={(e) => setPreferredDate(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-300">Preferred time
+                    <input required type="time" value={preferredTime} onChange={(e) => setPreferredTime(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" />
+                  </label>
+                </div>
+              )}
+              <label className="block text-xs font-semibold text-slate-300">{requestType === 'inquiry' ? 'Message (optional)' : 'Additional note (optional)'}
+                <textarea rows={3} value={requestMessage} onChange={(e) => setRequestMessage(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500" placeholder="Ask a question or share any details..." />
+              </label>
+              <button disabled={submittingRequest || !!requestSuccess} type="submit" className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60">{submittingRequest ? 'Sending request…' : requestSuccess ? 'Request sent' : requestType === 'inquiry' ? 'Send inquiry' : 'Request viewing'}</button>
+            </form>
+          </div>
+        </div>
+      )}
       <footer className="border-t border-slate-800 px-4 py-8 text-center text-xs text-slate-500">MavRent Platform · Rental discovery and property management</footer>
     </div>
   );
