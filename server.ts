@@ -610,7 +610,7 @@ app.post('/api/data/units', async (req, res) => {
         deposit_amount: Number(depositAmount || monthlyRent || 0),
         currency: currency || 'UGX',
         occupancy_status: dbStatus,
-        status: 'published',
+        status: 'draft',
       })
       .select()
       .single();
@@ -623,6 +623,41 @@ app.post('/api/data/units', async (req, res) => {
     res.json({ success: true, unit: data });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to create unit' });
+  }
+});
+
+// Explicitly publish or pause a listing; occupancy remains a separate field.
+app.patch('/api/data/units/:id/listing-status', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase is not configured.' });
+    const user = await getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: 'Please sign in.' });
+
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowedStatuses = ['draft', 'pending_review', 'published', 'paused', 'archived'];
+    if (!allowedStatuses.includes(status)) return res.status(400).json({ error: 'Invalid marketplace listing status.' });
+
+    const { data: unit, error: unitError } = await supabaseAdmin
+      .from('units').select('id,property_id,occupancy_status').eq('id', id).maybeSingle();
+    if (unitError) return res.status(503).json({ error: 'Unit database is not ready.' });
+    if (!unit) return res.status(404).json({ error: 'Unit not found.' });
+
+    const { data: property } = await supabaseAdmin
+      .from('properties').select('owner_id,landlord_id').eq('id', unit.property_id).maybeSingle();
+    if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
+      return res.status(403).json({ error: 'Only the property's landlord or manager can publish listings.' });
+    }
+    if (status === 'published' && unit.occupancy_status !== 'available') {
+      return res.status(409).json({ error: 'Only physically available units can be published. Update occupancy first.' });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('units').update({ status, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true, unit: data });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to update listing status.' });
   }
 });
 
@@ -875,7 +910,7 @@ app.post('/api/data/tenants', async (req, res) => {
     // Mark unit occupancy as occupied
     await supabaseAdmin
       .from('units')
-      .update({ occupancy_status: 'occupied' })
+      .update({ occupancy_status: 'occupied', status: 'paused' })
       .eq('id', unitId);
 
     // Create current billing period rent record
@@ -987,7 +1022,7 @@ app.post('/api/data/tenants/:id/terminate', async (req, res) => {
     // Release unit: mark occupancy as available without auto-publishing marketplace listing
     await supabaseAdmin
       .from('units')
-      .update({ occupancy_status: 'available' })
+      .update({ occupancy_status: 'available', status: 'paused' })
       .eq('id', tenant.unit_id);
 
     res.json({ success: true, message: 'Lease terminated and unit released.' });
