@@ -143,11 +143,11 @@ export const Header: React.FC<HeaderProps> = ({
                 ? 'border-blue-500/30 bg-blue-500/10 text-blue-400'
                 : 'border-slate-800 bg-slate-900/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
             }`}
-            title={syncError ? `Sync error: ${syncError}` : lastSyncedAt ? `Last synced: ${lastSyncedAt}` : 'Sync with Supabase'}
+            title={syncError ? 'Data refresh needs attention. Select to retry.' : lastSyncedAt ? `Last refreshed: ${lastSyncedAt}` : 'Refresh rental data'}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-400' : ''}`} />
             <span className="hidden xl:inline">
-              {isSyncing ? 'Syncing...' : syncError ? 'Sync Error' : 'Live Sync'}
+              {isSyncing ? 'Refreshing...' : syncError ? 'Retry sync' : 'Live'}
             </span>
           </button>
 
