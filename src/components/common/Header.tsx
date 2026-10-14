@@ -11,14 +11,11 @@ import {
   AlertCircle,
   Shield,
   Smartphone,
-  Layers,
   RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useProperty } from '../../context/PropertyContext';
-import { isSupabaseConfigured } from '../../lib/supabase';
 import { PWAInstallButton } from './PWAInstallButton';
-import { UserRole } from '../../types';
 
 interface HeaderProps {
   onOpenMavAi: () => void;
@@ -35,7 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
 }) => {
-  const { currentUser, role, switchRole, logout } = useAuth();
+  const { currentUser, role, logout } = useAuth();
   const {
     notifications,
     markNotificationRead,
@@ -133,50 +130,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Quick Perspective Switcher (Multi-Tenant Demonstrator) */}
-          <div className="hidden sm:flex items-center bg-slate-900/90 rounded-lg p-0.5 border border-slate-800 text-xs">
-            <button
-              onClick={() => switchRole('landlord')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                role === 'landlord'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Landlord View
-            </button>
-            <button
-              onClick={() => switchRole('tenant')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                role === 'tenant'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Tenant View
-            </button>
-          </div>
-
-          {/* Supabase Status Pill */}
-          <button
-            onClick={onOpenSupabaseSetup}
-            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
-              isSupabaseConfigured
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-                : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700'
-            }`}
-            title="Configure Supabase PostgreSQL & Auth"
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">
-              {isSupabaseConfigured ? 'Supabase Live' : 'Supabase Config'}
-            </span>
-            <div
-              className={`h-1.5 w-1.5 rounded-full ${
-                isSupabaseConfigured ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'
-              }`}
-            />
-          </button>
+          {/* Database configuration is intentionally not exposed in the customer portal. */}
 
           {/* Real-Time Sync Indicator & Manual Trigger */}
           <button
@@ -291,16 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
 
                 <div className="p-1 space-y-1">
-                  <button
-                    onClick={() => {
-                      switchRole(role === 'landlord' ? 'tenant' : 'landlord');
-                      setShowUserMenu(false);
-                    }}
-                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-slate-300 hover:bg-slate-800 transition"
-                  >
-                    <Layers className="w-4 h-4 text-blue-400" />
-                    <span>Switch to {role === 'landlord' ? 'Tenant' : 'Landlord'} View</span>
-                  </button>
+                  {role === 'admin' && (
                   <button
                     onClick={() => {
                       onOpenSupabaseSetup();
@@ -311,6 +256,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <Database className="w-4 h-4 text-emerald-400" />
                     <span>Database & Auth Setup</span>
                   </button>
+                  )}
                   <button
                     onClick={() => {
                       logout();
