@@ -16,6 +16,7 @@ import {
   MaintenanceStatus,
   ExpenseCategory,
   UnitType,
+  ListingStatus,
 } from '../types';
 import { useAuth } from './AuthContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -45,6 +46,7 @@ interface PropertyContextType {
   // Unit Actions
   addUnit: (propertyId: string, unit: Omit<Unit, 'id' | 'propertyId'>) => Promise<Unit>;
   updateUnit: (propertyId: string, unitId: string, updates: Partial<Unit>) => Promise<void>;
+  updateUnitListingStatus: (propertyId: string, unitId: string, status: ListingStatus) => Promise<void>;
   deleteUnit: (propertyId: string, unitId: string) => Promise<void>;
   // Tenant Actions
   addTenant: (tenant: Omit<Tenant, 'id' | 'tenantCode' | 'createdAt' | 'currentBalance'>) => Promise<Tenant>;
@@ -174,7 +176,8 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               monthlyRent: Number(u.monthly_rent || 0),
               depositAmount: Number(u.deposit_amount || 0),
               floor: u.floor || undefined,
-              status: (u.status === 'rented' ? 'occupied' : u.status === 'published' ? 'available' : u.status === 'paused' ? 'maintenance' : u.status === 'draft' ? 'reserved' : (u.status || 'available')),
+              status: (u.occupancy_status || (u.status === 'rented' ? 'occupied' : 'available')) as Unit['status'],
+              listingStatus: (u.status || 'draft') as ListingStatus,
               notes: u.notes || u.description || '',
             }));
 
@@ -501,7 +504,8 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       monthlyRent: Number(json.unit.monthly_rent || 0),
       depositAmount: Number(json.unit.deposit_amount || 0),
       floor: json.unit.floor || unitData.floor,
-      status: 'available',
+      status: (json.unit.occupancy_status || 'available') as Unit['status'],
+      listingStatus: (json.unit.status || 'draft') as ListingStatus,
       notes: json.unit.notes || unitData.notes,
     };
 
@@ -543,6 +547,29 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw new Error(err.error || 'Failed to update unit in Supabase');
       }
     } catch (err: any) {
+      setProperties(previous);
+      throw err;
+    }
+  };
+
+  // Change marketplace publication separately from physical occupancy.
+  const updateUnitListingStatus = async (propertyId: string, unitId: string, status: ListingStatus) => {
+    const previous = properties;
+    setProperties((prev) => prev.map((prop) => prop.id !== propertyId ? prop : ({
+      ...prop,
+      units: (prop.units || []).map((unit) => unit.id === unitId ? { ...unit, listingStatus: status } : unit),
+    })));
+    try {
+      const res = await authFetch(`/api/data/units/${unitId}/listing-status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to update marketplace listing status.');
+      }
+    } catch (err) {
       setProperties(previous);
       throw err;
     }
@@ -1245,6 +1272,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deleteProperty,
         addUnit,
         updateUnit,
+        updateUnitListingStatus,
         deleteUnit,
         addTenant,
         updateTenant,
