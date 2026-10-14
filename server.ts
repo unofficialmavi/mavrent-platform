@@ -115,6 +115,9 @@ app.post('/api/auth/signup', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
+    if (role && role !== 'landlord' && role !== 'tenant') {
+      return res.status(400).json({ error: 'Public sign-up supports landlord or tenant accounts only.' });
+    }
 
     // Create user in Supabase auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -352,19 +355,9 @@ app.post('/api/marketplace/viewings', async (req, res) => {
 app.get('/api/data/portfolio', async (req, res) => {
   try {
     if (!supabaseAdmin) {
-      return res.json({
-        success: true,
-        fromSupabase: false,
-        properties: [],
-        buildings: [],
-        units: [],
-        tenants: [],
-        rentRecords: [],
-        payments: [],
-        receipts: [],
-        maintenanceRequests: [],
-        expenses: [],
-        notifications: [],
+      return res.status(503).json({
+        success: false,
+        error: 'Server database credentials are missing. Please contact platform support.',
       });
     }
 
@@ -383,10 +376,14 @@ app.get('/api/data/portfolio', async (req, res) => {
     // Branch 1: Tenant data isolation
     if (isTenant && user) {
       // Find tenant record linked to this authenticated user (strictly verified user_id only)
-      const { data: tenantRecords } = await supabaseAdmin
+      const { data: tenantRecords, error: tenantRecordsError } = await supabaseAdmin
         .from('tenants')
         .select('*')
         .eq('user_id', user.id);
+      if (tenantRecordsError) {
+        console.error('Tenant portfolio schema/query error:', tenantRecordsError);
+        return res.status(503).json({ error: 'Tenant management data is not ready. Please contact platform support.' });
+      }
 
       const tenantRows = tenantRecords || [];
       const tenantIds = tenantRows.map((t) => t.id);
@@ -483,6 +480,12 @@ app.get('/api/data/portfolio', async (req, res) => {
         supabaseAdmin.from('maintenance_requests').select('*').in('property_id', propIds),
         supabaseAdmin.from('expenses').select('*').in('property_id', propIds),
       ]);
+
+      const schemaError = [bRes.error, uRes.error, tRes.error, rrRes.error, payRes.error, rcpRes.error, mRes.error, expRes.error].find(Boolean);
+      if (schemaError) {
+        console.error('Management schema/query error:', schemaError);
+        return res.status(503).json({ error: 'Management database setup is incomplete. Please contact platform support to finish the setup.' });
+      }
 
       if (bRes.data) buildings = bRes.data;
       if (uRes.data) units = uRes.data;
