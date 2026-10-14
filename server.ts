@@ -368,7 +368,7 @@ app.get('/api/data/portfolio', async (req, res) => {
     if (user) {
       const { data: p } = await supabaseAdmin.from('profiles').select('*').eq('id', user.id).single();
       userProfile = p;
-      if (p?.role === 'renter' || p?.role === 'tenant' || user.user_metadata?.role === 'tenant') {
+      if (p?.role === 'renter' || p?.role === 'tenant') {
         isTenant = true;
       }
     }
@@ -883,7 +883,6 @@ app.post('/api/data/tenants', async (req, res) => {
       rentAmount,
       dueDay,
       emergencyContact,
-      userId,
     } = req.body;
 
     if (!propertyId || !unitId || !fullName || !phone) {
@@ -920,7 +919,7 @@ app.post('/api/data/tenants', async (req, res) => {
       .insert({
         property_id: propertyId,
         unit_id: unitId,
-        user_id: userId || null,
+        user_id: null,
         tenant_code: tenantCode,
         full_name: fullName,
         phone,
