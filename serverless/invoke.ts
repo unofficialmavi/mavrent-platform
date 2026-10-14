@@ -5,5 +5,5 @@ export function invokeExpress(req: any, res: any, routePath: string) {
   const rawUrl = typeof req.url === 'string' ? req.url : '';
   const query = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
   req.url = routePath + query;
-  return app(req, res);
+  return (app as unknown as (request: any, response: any) => unknown)(req, res);
 }
