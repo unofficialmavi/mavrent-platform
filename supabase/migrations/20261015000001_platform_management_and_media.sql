@@ -223,6 +223,46 @@ create table if not exists public.ai_audit_logs (
   created_at timestamptz not null default now()
 );
 
+-- Keep public discovery limited to published and physically available units.
+drop policy if exists "published units are public" on public.units;
+create policy "published units are public" on public.units for select to anon, authenticated
+using (status::text = 'published' and occupancy_status = 'available');
+
+drop policy if exists "published property details are public" on public.properties;
+create policy "published property details are public" on public.properties for select to anon, authenticated
+using (exists (
+  select 1 from public.units u
+  where u.property_id = properties.id and u.status::text = 'published' and u.occupancy_status = 'available'
+));
+
+drop policy if exists "published listing media are public" on public.listing_media;
+create policy "published listing media are public" on public.listing_media for select to anon, authenticated
+using (exists (
+  select 1 from public.units u
+  where u.id = listing_media.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
+));
+
+drop policy if exists "published unit amenities are public" on public.unit_amenities;
+create policy "published unit amenities are public" on public.unit_amenities for select to anon, authenticated
+using (exists (
+  select 1 from public.units u
+  where u.id = unit_amenities.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
+));
+
+drop policy if exists "renters create inquiries" on public.inquiries;
+create policy "renters create inquiries" on public.inquiries for insert to anon, authenticated
+with check (exists (
+  select 1 from public.units u
+  where u.id = inquiries.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
+));
+
+drop policy if exists "renters create viewing requests" on public.viewing_requests;
+create policy "renters create viewing requests" on public.viewing_requests for insert to anon, authenticated
+with check (exists (
+  select 1 from public.units u
+  where u.id = viewing_requests.unit_id and u.status::text = 'published' and u.occupancy_status = 'available'
+));
+
 -- Enable row-level security on all private management data.
 alter table public.buildings enable row level security;
 alter table public.tenants enable row level security;
