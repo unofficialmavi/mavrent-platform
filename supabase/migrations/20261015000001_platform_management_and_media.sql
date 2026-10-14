@@ -228,12 +228,9 @@ drop policy if exists "published units are public" on public.units;
 create policy "published units are public" on public.units for select to anon, authenticated
 using (status::text = 'published' and occupancy_status = 'available');
 
+-- Property details for the public marketplace are served by the filtered server API,
+-- avoiding cross-table RLS recursion and exposing only fields selected by that API.
 drop policy if exists "published property details are public" on public.properties;
-create policy "published property details are public" on public.properties for select to anon, authenticated
-using (exists (
-  select 1 from public.units u
-  where u.property_id = properties.id and u.status::text = 'published' and u.occupancy_status = 'available'
-));
 
 drop policy if exists "published listing media are public" on public.listing_media;
 create policy "published listing media are public" on public.listing_media for select to anon, authenticated
