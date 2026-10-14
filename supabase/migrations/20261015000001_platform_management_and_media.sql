@@ -7,6 +7,7 @@ begin;
 -- Preserve the marketplace's existing properties and units.
 alter table public.properties add column if not exists landlord_id uuid;
 alter table public.properties add column if not exists currency text not null default 'UGX';
+alter table public.profiles add column if not exists tenant_code text;
 update public.properties set landlord_id = owner_id where landlord_id is null and owner_id is not null;
 
 do $$
@@ -54,6 +55,7 @@ alter table public.units add column if not exists available_from date;
 alter table public.units add column if not exists bedrooms integer not null default 0;
 alter table public.units add column if not exists bathrooms integer not null default 1;
 update public.units set unit_number = title where unit_number is null and title is not null;
+update public.units set occupancy_status = 'occupied' where status::text = 'rented';
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'units_occupancy_status_check' and conrelid = 'public.units'::regclass) then
@@ -194,6 +196,21 @@ create table if not exists public.notifications (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.tenant_link_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  phone_hash text not null,
+  otp_hash text not null,
+  attempts integer not null default 0,
+  max_attempts integer not null default 3,
+  expires_at timestamptz not null,
+  resend_available_at timestamptz not null,
+  verified_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists tenant_link_requests_user_created_idx on public.tenant_link_requests(user_id, created_at desc);
+
 create table if not exists public.ai_audit_logs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete restrict,
@@ -216,6 +233,7 @@ alter table public.maintenance_requests enable row level security;
 alter table public.expenses enable row level security;
 alter table public.notifications enable row level security;
 alter table public.ai_audit_logs enable row level security;
+alter table public.tenant_link_requests enable row level security;
 
 -- Buildings: only the property's owner/manager may manage them.
 drop policy if exists "platform_buildings_owner_manage" on public.buildings;
@@ -271,6 +289,10 @@ drop policy if exists "platform_expenses_owner_manage" on public.expenses;
 create policy "platform_expenses_owner_manage" on public.expenses for all to authenticated
 using (exists (select 1 from public.properties p where p.id = expenses.property_id and (p.owner_id = auth.uid() or p.landlord_id = auth.uid())))
 with check (exists (select 1 from public.properties p where p.id = expenses.property_id and (p.owner_id = auth.uid() or p.landlord_id = auth.uid())));
+
+-- Tenant-link verification challenges are server-managed and never exposed to client roles.
+drop policy if exists "platform_tenant_link_requests_no_client_access" on public.tenant_link_requests;
+create policy "platform_tenant_link_requests_no_client_access" on public.tenant_link_requests for all to authenticated using (false) with check (false);
 
 -- Notifications and AI audit rows are private to their account.
 drop policy if exists "platform_notifications_read_own" on public.notifications;
