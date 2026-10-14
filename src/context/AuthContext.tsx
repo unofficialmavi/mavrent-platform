@@ -35,10 +35,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             let mappedRole: UserRole = 'landlord';
             let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
             let phone = user.phone || '';
-            let tenantCode = user.user_metadata?.tenant_code;
+            let tenantCode: string | undefined;
 
             try {
-              const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+              const { data: prof, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+              if (profileError) throw profileError;
+              if (!prof) {
+                await supabase.auth.signOut();
+                if (isMounted) setCurrentUser(null);
+                localStorage.removeItem('mavrent_current_user');
+                return;
+              }
               if (prof) {
                 if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
                 else if (prof.role === 'agent') mappedRole = 'property_manager';
@@ -54,7 +61,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (ten?.tenant_code) tenantCode = ten.tenant_code;
               }
             } catch (pErr) {
-              console.warn('Profile enrichment warning:', pErr);
+              console.warn('Profile lookup failed; refusing to create a local demo session.', pErr);
+              if (isMounted) setCurrentUser(null);
+              localStorage.removeItem('mavrent_current_user');
+              return;
             }
 
             const profile: UserProfile = {
@@ -90,7 +100,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (supabase) {
             try {
-              const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+              const { data: prof, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+              if (profileError || !prof) {
+                setCurrentUser(null);
+                localStorage.removeItem('mavrent_current_user');
+                return;
+              }
               if (prof) {
                 if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
                 else if (prof.role === 'agent') mappedRole = 'property_manager';
