@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Wrench,
   Plus,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useProperty } from '../../context/PropertyContext';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import {
   MaintenanceRequest,
   MaintenanceCategory,
@@ -41,14 +42,43 @@ export const MaintenanceView: React.FC = () => {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<MaintenanceCategory>('plumbing');
   const [priority, setPriority] = useState<MaintenancePriority>('medium');
-  const [photoUrl, setPhotoUrl] = useState('');
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState('');
+  const [resolvedMedia, setResolvedMedia] = useState<Record<string, string>>({});
 
   // Landlord action state
   const [workerName, setWorkerName] = useState('');
   const [landlordNotes, setLandlordNotes] = useState('');
 
   const isTenant = role === 'tenant';
-  const myTenant = tenants.find((t) => t.userId === currentUser?.id || t.email === currentUser?.email) || tenants[0];
+  const myTenant = tenants.find((t) => t.userId === currentUser?.id);
+  const landlordSelectedTenant = tenants.find((t) => t.id === selectedTenantId);
+  const targetTenantForView = isTenant ? myTenant : landlordSelectedTenant;
+
+  useEffect(() => {
+    if (!selectedTenantId && tenants.length > 0 && !isTenant) setSelectedTenantId(tenants[0].id);
+  }, [tenants, selectedTenantId, isTenant]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveAttachments() {
+      if (!supabase) return;
+      const entries = maintenanceRequests.flatMap((ticket) => ticket.mediaUrls || []);
+      const unique = [...new Set(entries)];
+      const resolved: Record<string, string> = {};
+      for (const path of unique) {
+        if (/^https?:\\/\\//i.test(path)) {
+          resolved[path] = path;
+          continue;
+        }
+        const { data, error } = await supabase.storage.from('maintenance-media').createSignedUrl(path, 60 * 60);
+        if (!error && data?.signedUrl) resolved[path] = data.signedUrl;
+      }
+      if (!cancelled) setResolvedMedia((previous) => ({ ...previous, ...resolved }));
+    }
+    void resolveAttachments();
+    return () => { cancelled = true; };
+  }, [maintenanceRequests]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,14 +88,40 @@ export const MaintenanceView: React.FC = () => {
       return;
     }
 
-    const targetTenant = isTenant ? myTenant : tenants[0];
+    const targetTenant = isTenant ? myTenant : landlordSelectedTenant;
     if (!targetTenant) {
-      setTicketError('No tenant profile found to associate with this ticket.');
+      setTicketError(isTenant
+        ? 'Your tenant account is not linked to an active lease yet. Please contact your property manager.'
+        : 'Choose the tenant and unit this maintenance report belongs to.');
+      return;
+    }
+    if (mediaFiles.length > 5) {
+      setTicketError('You can attach up to 5 photos or videos per report.');
+      return;
+    }
+    const oversized = mediaFiles.find((file) => file.size > 50 * 1024 * 1024);
+    if (oversized) {
+      setTicketError('Each attachment must be 50 MB or smaller.');
       return;
     }
 
     setSubmitting(true);
     try {
+      if (!supabase || !currentUser) throw new Error('Please sign in again before uploading attachments.');
+      const uploadedPaths: string[] = [];
+      for (const file of mediaFiles) {
+        if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+          throw new Error('Only image and video attachments are supported.');
+        }
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const objectPath = `${targetTenant.propertyId}/${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
+        const { error: uploadError } = await supabase.storage
+          .from('maintenance-media')
+          .upload(objectPath, file, { contentType: file.type, upsert: false });
+        if (uploadError) throw new Error(`Attachment upload failed: ${uploadError.message}`);
+        uploadedPaths.push(objectPath);
+      }
+
       await createMaintenanceRequest({
         propertyId: targetTenant.propertyId,
         unitId: targetTenant.unitId,
@@ -74,13 +130,13 @@ export const MaintenanceView: React.FC = () => {
         description,
         category,
         priority,
-        mediaUrls: photoUrl ? [photoUrl] : [],
+        mediaUrls: uploadedPaths,
       });
 
       setShowSubmitModal(false);
       setTitle('');
       setDescription('');
-      setPhotoUrl('');
+      setMediaFiles([]);
     } catch (err: any) {
       setTicketError(err?.message || 'Unable to submit maintenance ticket. Please check connection and try again.');
     } finally {
@@ -198,14 +254,21 @@ export const MaintenanceView: React.FC = () => {
 
               <p className="mt-3 text-xs text-slate-300 leading-relaxed">{ticket.description}</p>
 
-              {/* Photo preview if attached */}
+              {/* Private maintenance attachments are served with short-lived signed URLs. */}
               {ticket.mediaUrls.length > 0 && (
-                <div className="mt-3">
-                  <img
-                    src={ticket.mediaUrls[0]}
-                    alt="Issue photo"
-                    className="h-28 w-full object-cover rounded-xl border border-slate-800"
-                  />
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {ticket.mediaUrls.slice(0, 4).map((path) => {
+                    const src = resolvedMedia[path];
+                    const isVideo = /\\.(mp4|mov|webm|m4v)(?:$|\\?)/i.test(path);
+                    return (
+                      <div key={path} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+                        {src ? (isVideo
+                          ? <video src={src} controls preload="metadata" className="h-28 w-full object-cover" />
+                          : <a href={src} target="_blank" rel="noreferrer"><img src={src} alt="Maintenance issue attachment" loading="lazy" className="h-28 w-full object-cover" /></a>)
+                          : <div className="flex h-28 items-center justify-center px-2 text-center text-[10px] text-slate-500">Private attachment loading…</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -317,15 +380,30 @@ export const MaintenanceView: React.FC = () => {
                 />
               </div>
 
+              {!isTenant && (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Tenant / Unit</label>
+                  <select value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)} required className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3.5 py-2 text-white">
+                    <option value="">Choose tenant</option>
+                    {tenants.filter((t) => t.status === 'active').map((t) => (
+                      <option key={t.id} value={t.id}>{t.fullName} · {t.tenantCode}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Photo URL (Optional)</label>
+                <label className="block text-slate-300 font-semibold mb-1">Photos or videos (Optional)</label>
                 <input
-                  type="url"
-                  placeholder="https://..."
-                  value={photoUrl}
-                  onChange={(e) => setPhotoUrl(e.target.value)}
-                  className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3.5 py-2 text-white"
+                  type="file"
+                  accept="image/*,video/*"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => setMediaFiles(Array.from(e.target.files || []))}
+                  className="block w-full rounded-xl bg-slate-950 border border-slate-800 px-3.5 py-2 text-xs text-white file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:font-semibold file:text-white"
                 />
+                <p className="mt-1.5 text-[10px] leading-4 text-slate-500">Attach up to 5 photos or videos, 50 MB each. On a phone, choose the camera or gallery when available.</p>
+                {mediaFiles.length > 0 && <ul className="mt-2 space-y-1 text-[10px] text-slate-300">{mediaFiles.map((file) => <li key={file.name + file.size} className="truncate">• {file.name} · {(file.size / (1024 * 1024)).toFixed(1)} MB</li>)}</ul>}
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
