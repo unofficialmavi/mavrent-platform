@@ -6,6 +6,8 @@ export type UnitType = 'room' | 'apartment' | 'house' | 'office' | 'shop' | 'com
 
 export type UnitStatus = 'available' | 'occupied' | 'maintenance' | 'reserved';
 
+export type ListingStatus = 'draft' | 'pending_review' | 'published' | 'paused' | 'archived';
+
 export type PaymentMethod = 'cash' | 'mobile_money' | 'bank' | 'card' | 'other';
 
 export type MaintenanceCategory = 'plumbing' | 'electrical' | 'structural' | 'appliance' | 'painting' | 'cleaning' | 'other';
@@ -44,6 +46,7 @@ export interface Unit {
   depositAmount: number;
   floor?: string;
   status: UnitStatus;
+  listingStatus?: ListingStatus;
   notes?: string;
 }
 
