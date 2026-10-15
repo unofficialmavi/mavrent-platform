@@ -1,8 +1,32 @@
-export type UserRole = 'landlord' | 'tenant' | 'property_manager' | 'admin';
+export type UserRole = 'landlord' | 'tenant' | 'property_manager' | 'admin' | 'guest';
 
-export type PropertyType = 'residential' | 'commercial' | 'mixed' | 'hostel';
+export type PropertyType =
+  | 'residential'
+  | 'commercial'
+  | 'mixed'
+  | 'hostel'
+  | 'hotel'
+  | 'motel'
+  | 'serviced_apartment'
+  | 'guesthouse'
+  | 'vacation_rental';
 
-export type UnitType = 'room' | 'apartment' | 'house' | 'office' | 'shop' | 'commercial';
+export type AccommodationCategory =
+  | 'apartment'
+  | 'house'
+  | 'room'
+  | 'studio'
+  | 'hostel'
+  | 'short_stay'
+  | 'hotel'
+  | 'motel'
+  | 'serviced_apartment'
+  | 'guesthouse'
+  | 'commercial';
+
+export type StayPricingType = 'monthly' | 'nightly' | 'both';
+
+export type UnitType = 'room' | 'apartment' | 'house' | 'office' | 'shop' | 'commercial' | 'studio' | 'suite' | 'dorm_bed';
 
 export type UnitStatus = 'available' | 'occupied' | 'maintenance' | 'reserved';
 
@@ -48,6 +72,19 @@ export interface Unit {
   status: UnitStatus;
   listingStatus?: ListingStatus;
   notes?: string;
+  // Unified Accommodation Marketplace Attributes
+  category?: AccommodationCategory;
+  stayType?: StayPricingType;
+  nightlyRate?: number;
+  weeklyRate?: number;
+  cleaningFee?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  maxGuests?: number;
+  amenities?: string[];
+  images?: string[];
+  houseRules?: string[];
+  marketplaceStatus?: 'draft' | 'published' | 'paused' | 'archived';
 }
 
 export interface Property {
@@ -201,4 +238,75 @@ export interface ProposedAiAction {
   payload: any;
   summary: string;
   requiresConfirmation: boolean;
+}
+
+export interface ShortStayReservation {
+  id: string;
+  unitId: string;
+  propertyId: string;
+  guestId?: string;
+  bookingReference: string; // e.g. "MVR-STAY-94812"
+  guestName: string;
+  guestEmail: string;
+  guestPhone: string;
+  checkIn: string; // "YYYY-MM-DD"
+  checkOut: string; // "YYYY-MM-DD"
+  guestCount: number;
+  nights: number;
+  nightlyRate: number;
+  serviceFee: number;
+  cleaningFee: number;
+  totalAmount: number;
+  currency: string;
+  specialRequests?: string;
+  status: 'pending_confirmation' | 'confirmed' | 'cancelled' | 'completed';
+  createdAt: string;
+}
+
+export interface MarketplaceInquiry {
+  id: string;
+  unitId: string;
+  propertyId: string;
+  userId?: string;
+  name: string;
+  email: string;
+  phone: string;
+  inquiryType: 'viewing_request' | 'general_inquiry' | 'lease_application' | 'booking_inquiry';
+  preferredDate?: string;
+  message: string;
+  status: 'pending' | 'responded' | 'scheduled' | 'closed';
+  createdAt: string;
+}
+
+export interface AccommodationListing {
+  id: string; // Unit ID
+  propertyId: string;
+  landlordId: string;
+  title: string;
+  propertyName: string;
+  address: string;
+  city: string;
+  country: string;
+  currency: string;
+  propertyType: PropertyType;
+  category: AccommodationCategory;
+  stayType: StayPricingType;
+  unitType: UnitType;
+  unitNumber: string;
+  monthlyRent: number;
+  depositAmount: number;
+  nightlyRate: number;
+  weeklyRate?: number;
+  cleaningFee: number;
+  bedrooms: number;
+  bathrooms: number;
+  maxGuests: number;
+  floor?: string;
+  amenities: string[];
+  images: string[];
+  houseRules: string[];
+  description: string;
+  marketplaceStatus: 'draft' | 'published' | 'paused' | 'archived';
+  occupancyStatus: UnitStatus;
+  createdAt: string;
 }

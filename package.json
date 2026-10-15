@@ -1,15 +1,16 @@
 {
-  "name": "react-example",
+  "name": "mavrent-platform",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "start": "tsx server.ts",
+    "start": "node server.js || tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx scripts/concurrency_audit_simulation.ts && tsx scripts/tenant_otp_unit_tests.ts && tsx scripts/marketplace_reservations_unit_tests.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

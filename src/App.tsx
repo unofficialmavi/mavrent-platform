@@ -20,6 +20,7 @@ import { MaintenanceView } from './components/views/MaintenanceView';
 import { ExpensesView } from './components/views/ExpensesView';
 import { ReportsView } from './components/views/ReportsView';
 import { CareModeView } from './components/views/CareModeView';
+import { MarketplaceView } from './components/views/MarketplaceView';
 
 const MainApp: React.FC = () => {
   const { role, currentUser } = useAuth();
@@ -111,6 +112,10 @@ const MainApp: React.FC = () => {
               <p className="text-xs text-slate-400 mt-1">Connecting to live Supabase database & ledger...</p>
             </div>
           </div>
+        ) : activeTab === 'marketplace' ? (
+          <MarketplaceView />
+        ) : role === 'guest' ? (
+          <MarketplaceView />
         ) : role === 'tenant' ? (
           /* Tenant View */
           <>
