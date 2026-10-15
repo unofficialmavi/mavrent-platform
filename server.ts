@@ -646,7 +646,7 @@ app.patch('/api/data/units/:id/listing-status', async (req, res) => {
     const { data: property } = await supabaseAdmin
       .from('properties').select('owner_id,landlord_id').eq('id', unit.property_id).maybeSingle();
     if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
-      return res.status(403).json({ error: 'Only the property's landlord or manager can publish listings.' });
+      return res.status(403).json({ error: "Only the property's landlord or manager can publish listings." });
     }
     if (status === 'published' && unit.occupancy_status !== 'available') {
       return res.status(409).json({ error: 'Only physically available units can be published. Update occupancy first.' });
@@ -680,7 +680,7 @@ app.post('/api/data/units/:id/media', async (req, res) => {
     }
     const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', unit.property_id).maybeSingle();
     if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
-      return res.status(403).json({ error: 'Only the property's landlord or manager can add listing media.' });
+      return res.status(403).json({ error: "Only the property's landlord or manager can add listing media." });
     }
     const publicUrl = supabaseAdmin.storage.from('rental-listing-media').getPublicUrl(objectPath).data.publicUrl;
     const { data, error } = await supabaseAdmin.from('listing_media').insert({
@@ -2180,7 +2180,7 @@ app.patch('/api/data/maintenance/:id', async (req, res) => {
       .from('properties').select('owner_id,landlord_id').eq('id', ticket.property_id).maybeSingle();
     if (propertyError) return res.status(503).json({ error: 'Property database is not ready.' });
     if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
-      return res.status(403).json({ error: 'Only the property's landlord or manager can update this request.' });
+      return res.status(403).json({ error: "Only the property's landlord or manager can update this request." });
     }
 
     const { data, error } = await supabaseAdmin
@@ -2215,7 +2215,7 @@ app.post('/api/data/expenses', async (req, res) => {
     }
     const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', propertyId).maybeSingle();
     if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
-      return res.status(403).json({ error: 'Only the property's landlord or manager can record expenses.' });
+      return res.status(403).json({ error: "Only the property's landlord or manager can record expenses." });
     }
     const { data, error } = await supabaseAdmin.from('expenses').insert({
       property_id: propertyId, unit_id: unitId || null, amount: Number(amount),
@@ -2240,7 +2240,7 @@ app.delete('/api/data/expenses/:id', async (req, res) => {
     if (!expense) return res.status(404).json({ error: 'Expense not found.' });
     const { data: property } = await supabaseAdmin.from('properties').select('owner_id,landlord_id').eq('id', expense.property_id).maybeSingle();
     if (!property || (property.owner_id !== user.id && property.landlord_id !== user.id)) {
-      return res.status(403).json({ error: 'Only the property's landlord or manager can delete expenses.' });
+      return res.status(403).json({ error: "Only the property's landlord or manager can delete expenses." });
     }
     const { error } = await supabaseAdmin.from('expenses').delete().eq('id', id);
     if (error) return res.status(400).json({ error: error.message });
