@@ -8,7 +8,6 @@ import { ReceiptModal } from './components/common/ReceiptModal';
 import { SupabaseSetupModal } from './components/common/SupabaseSetupModal';
 import { MavAiDrawer } from './components/ai/MavAiDrawer';
 import { AuthModal } from './components/auth/AuthModal';
-import { MarketplaceView } from './components/marketplace/MarketplaceView';
 
 // Views
 import { LandlordDashboard } from './components/dashboard/LandlordDashboard';
@@ -113,9 +112,9 @@ const MainApp: React.FC = () => {
             </div>
           </div>
         ) : activeTab === 'marketplace' ? (
-          <MarketplaceView />
+          <MarketplaceView onSignIn={() => setShowAuthModal(true)} onOpenAuthModal={() => setShowAuthModal(true)} />
         ) : role === 'guest' ? (
-          <MarketplaceView />
+          <MarketplaceView onSignIn={() => setShowAuthModal(true)} onOpenAuthModal={() => setShowAuthModal(true)} />
         ) : role === 'tenant' ? (
           /* Tenant View */
           <>

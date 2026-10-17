@@ -405,7 +405,7 @@ export const PropertiesView: React.FC = () => {
                     <input type="file" accept="image/*,video/*" multiple className="hidden" disabled={mediaUploadingUnitId === unit.id} onChange={(e) => { void handleUploadListingMedia(unit, e.currentTarget.files); e.currentTarget.value = ''; }} />
                   </label>
                   <button
-                    onClick={() => void handleListingStatus(unit)
+                    onClick={() => void handleListingStatus(unit)}
                     disabled={unit.status !== 'available' && unit.listingStatus !== 'published'}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-[10px] font-bold text-blue-200 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
                     title={unit.status !== 'available' ? 'Only available units can be published' : 'Update marketplace visibility'}

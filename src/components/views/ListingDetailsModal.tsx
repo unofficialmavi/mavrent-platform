@@ -163,7 +163,7 @@ export const ListingDetailsModal: React.FC<ListingDetailsModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="rounded bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-400 uppercase tracking-wider">
-                {listing.category.replace('_', ' ')}
+                {(listing.category || 'stay').replace(/_/g, ' ')}
               </span>
               <span className="text-xs text-slate-400">•</span>
               <span className="text-xs text-slate-300 font-medium">{listing.propertyName}</span>

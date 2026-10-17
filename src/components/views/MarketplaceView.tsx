@@ -23,7 +23,12 @@ import { AccommodationListing, AccommodationCategory, StayPricingType } from '..
 import { ListingDetailsModal } from './ListingDetailsModal';
 import { useAuth } from '../../context/AuthContext';
 
-export const MarketplaceView: React.FC = () => {
+export interface MarketplaceViewProps {
+  onSignIn?: () => void;
+  onOpenAuthModal?: () => void;
+}
+
+export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ onSignIn, onOpenAuthModal }) => {
   const { role } = useAuth();
 
   const [listings, setListings] = useState<AccommodationListing[]>([]);
@@ -114,10 +119,10 @@ export const MarketplaceView: React.FC = () => {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const match =
-        l.title.toLowerCase().includes(q) ||
-        l.propertyName.toLowerCase().includes(q) ||
-        l.city.toLowerCase().includes(q) ||
-        l.address.toLowerCase().includes(q);
+        (l.title || '').toLowerCase().includes(q) ||
+        (l.propertyName || '').toLowerCase().includes(q) ||
+        (l.city || '').toLowerCase().includes(q) ||
+        (l.address || '').toLowerCase().includes(q);
       if (!match) return false;
     }
     return true;
@@ -376,7 +381,7 @@ export const MarketplaceView: React.FC = () => {
                   {/* Top Overlay Badges */}
                   <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
                     <span className="rounded-lg bg-slate-950/80 backdrop-blur-md px-2.5 py-1 text-[10px] font-bold text-white uppercase tracking-wider">
-                      {listing.category.replace('_', ' ')}
+                      {(listing.category || 'stay').replace(/_/g, ' ')}
                     </span>
                     {listing.stayType === 'both' ? (
                       <span className="rounded-lg bg-blue-600/90 backdrop-blur-md px-2 py-1 text-[10px] font-bold text-white">
@@ -404,17 +409,17 @@ export const MarketplaceView: React.FC = () => {
                   {/* Bottom Image Gradient Price Bar */}
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent p-4 flex items-end justify-between">
                     <div>
-                      {listing.stayType !== 'monthly' && listing.nightlyRate > 0 ? (
+                      {listing.stayType !== 'monthly' && (listing.nightlyRate || 0) > 0 ? (
                         <div>
                           <span className="text-base sm:text-lg font-black text-white">
-                            {listing.currency} {listing.nightlyRate.toLocaleString()}
+                            {listing.currency || 'UGX'} {(listing.nightlyRate || 0).toLocaleString()}
                           </span>
                           <span className="text-slate-300 text-xs"> / night</span>
                         </div>
                       ) : (
                         <div>
                           <span className="text-base sm:text-lg font-black text-white">
-                            {listing.currency} {listing.monthlyRent.toLocaleString()}
+                            {listing.currency || 'UGX'} {(listing.monthlyRent || 0).toLocaleString()}
                           </span>
                           <span className="text-slate-300 text-xs"> / month</span>
                         </div>
@@ -422,7 +427,7 @@ export const MarketplaceView: React.FC = () => {
                     </div>
 
                     <div className="rounded-full bg-slate-900/90 px-2 py-0.5 text-[10px] font-bold text-slate-300 border border-slate-700">
-                      {listing.city}
+                      {listing.city || 'Available'}
                     </div>
                   </div>
                 </div>
@@ -470,6 +475,7 @@ export const MarketplaceView: React.FC = () => {
       <ListingDetailsModal
         listing={selectedListing}
         isOpen={isModalOpen}
+        onOpenAuthModal={onOpenAuthModal || onSignIn}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedListing(null);

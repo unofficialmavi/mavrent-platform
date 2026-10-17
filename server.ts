@@ -275,22 +275,53 @@ app.get('/api/marketplace/listings', async (_req, res) => {
     }
 
     const listings = rows
-      .map((unit: any) => ({
-        id: unit.id,
-        propertyId: unit.property_id,
-        title: unit.title || unit.unit_number || 'Rental unit',
-        description: unit.description || '',
-        unitType: unit.unit_type || 'room',
-        bedrooms: Number(unit.bedrooms || 0),
-        bathrooms: Number(unit.bathrooms || 1),
-        monthlyRent: Number(unit.monthly_rent || 0),
-        depositAmount: Number(unit.deposit_amount || 0),
-        currency: unit.currency || 'UGX',
-        furnished: Boolean(unit.furnished),
-        availableFrom: unit.available_from || null,
-        property: propertyMap.get(unit.property_id) || null,
-        media: mediaMap.get(unit.id) || [],
-      }))
+      .map((unit: any) => {
+        const prop = propertyMap.get(unit.property_id);
+        const unitMedia = mediaMap.get(unit.id) || [];
+        const mediaUrls = unitMedia.map((m: any) => m.media_url).filter(Boolean);
+        const imagesList = Array.isArray(unit.images) && unit.images.length > 0
+          ? unit.images
+          : mediaUrls.length > 0
+          ? mediaUrls
+          : (prop?.cover_image_url ? [prop.cover_image_url] : []);
+
+        const category = unit.category || unit.accommodation_category || prop?.property_type || 'apartment';
+        const stayType = unit.stay_type || (unit.nightly_rate > 0 ? (unit.monthly_rent > 0 ? 'both' : 'nightly') : 'monthly');
+
+        return {
+          id: unit.id,
+          propertyId: unit.property_id,
+          landlordId: prop?.landlord_id || prop?.owner_id || '',
+          title: unit.title || `${prop?.name || 'Property'} - Unit ${unit.unit_number || ''}`.trim(),
+          propertyName: prop?.name || 'Property',
+          address: prop?.address || '',
+          city: prop?.city || prop?.district || prop?.area || 'Kampala',
+          country: prop?.country || 'Uganda',
+          currency: unit.currency || prop?.currency || 'UGX',
+          propertyType: prop?.property_type || 'residential',
+          category: category,
+          stayType: stayType,
+          unitType: unit.unit_type || 'apartment',
+          unitNumber: unit.unit_number || '',
+          monthlyRent: Number(unit.monthly_rent || 0),
+          depositAmount: Number(unit.deposit_amount || 0),
+          nightlyRate: Number(unit.nightly_rate || 0),
+          weeklyRate: unit.weekly_rate ? Number(unit.weekly_rate) : undefined,
+          cleaningFee: Number(unit.cleaning_fee || 0),
+          bedrooms: Number(unit.bedrooms || 1),
+          bathrooms: Number(unit.bathrooms || 1),
+          maxGuests: Number(unit.max_guests || 2),
+          floor: unit.floor || undefined,
+          amenities: Array.isArray(unit.amenities) ? unit.amenities : [],
+          images: imagesList,
+          houseRules: Array.isArray(unit.house_rules) ? unit.house_rules : [],
+          description: unit.description || prop?.description || '',
+          marketplaceStatus: unit.status || 'published',
+          occupancyStatus: unit.occupancy_status || 'available',
+          property: prop || null,
+          media: unitMedia,
+        };
+      })
       .filter((listing: any) => listing.property !== null);
 
     return res.json({ success: true, listings });
