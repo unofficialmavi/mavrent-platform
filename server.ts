@@ -134,13 +134,21 @@ app.post('/api/auth/signup', async (req, res) => {
     const userId = authData.user.id;
     const dbRole = role === 'tenant' ? 'renter' : 'landlord';
 
-    // Insert or update profile
-    await supabaseAdmin.from('profiles').upsert({
+    // Ensure the profile exists before reporting success. A missing profile
+    // makes authentication appear successful while the app cannot load a role.
+    const { error: profileError } = await supabaseAdmin.from('profiles').upsert({
       id: userId,
       full_name: fullName || '',
       phone: phone || null,
       role: dbRole,
     });
+    if (profileError) {
+      console.error('Signup profile creation failed:', profileError);
+      // Roll back the auth user so the user can retry cleanly instead of
+      // leaving an account that cannot enter the application.
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      return res.status(500).json({ success: false, error: 'Your account could not be initialized. Please try again or contact support.' });
+    }
 
     // Create a session for client
     const anonClient = createClient(supabaseUrl, supabaseAnonKey);
@@ -218,8 +226,42 @@ app.post('/api/auth/signin', async (req, res) => {
 
     let profile = null;
     if (supabaseAdmin && sessionData.user) {
-      const { data: p } = await supabaseAdmin.from('profiles').select('*').eq('id', sessionData.user.id).single();
-      profile = p;
+      const user = sessionData.user;
+      const { data: existingProfile, error: profileLookupError } = await supabaseAdmin
+        .from('profiles').select('*').eq('id', user.id).maybeSingle();
+
+      if (profileLookupError) {
+        console.error('Signin profile lookup failed:', profileLookupError);
+        return res.status(503).json({ success: false, error: 'Your account is authenticated, but its profile could not be loaded. Please contact support.' });
+      }
+
+      if (existingProfile) {
+        profile = existingProfile;
+      } else {
+        // Repair older accounts that exist in Supabase Auth but lack a profile.
+        const metadataRole = user.user_metadata?.role;
+        const dbRole = metadataRole === 'tenant' || metadataRole === 'renter' ? 'renter' : 'landlord';
+        const { data: repairedProfile, error: repairError } = await supabaseAdmin
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+            phone: user.phone || null,
+            role: dbRole,
+          })
+          .select('*')
+          .single();
+
+        if (repairError) {
+          console.error('Signin profile repair failed:', repairError);
+          return res.status(503).json({ success: false, error: 'Your account exists, but its profile needs repair before you can sign in. Please contact support.' });
+        }
+        profile = repairedProfile;
+      }
+    }
+
+    if (!profile) {
+      return res.status(503).json({ success: false, error: 'Account profile service is unavailable.' });
     }
 
     res.json({
