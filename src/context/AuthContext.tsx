@@ -14,6 +14,26 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Read API responses defensively so a failed/empty serverless response shows a
+// useful message instead of the browser's opaque "Unexpected end of JSON input".
+async function readApiResponse(res: Response, operation: string): Promise<any> {
+  const body = await res.text();
+  if (!body.trim()) {
+    throw new Error(
+      `${operation} could not be completed because the server returned an empty response (HTTP ${res.status}). The account may not have been created. Please retry once; if this continues, the API deployment needs attention.`
+    );
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    if (!res.ok) {
+      throw new Error(`${operation} failed (HTTP ${res.status}). The server did not return a valid error message.`);
+    }
+    throw new Error(`${operation} received an unexpected response from the server. Please try again shortly.`);
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
 
@@ -149,7 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           body: JSON.stringify({ email, password }),
         });
 
-        const json = await res.json();
+        const json = await readApiResponse(res, 'Sign in');
         if (!res.ok || !json.success) {
           throw new Error(json.error || 'Invalid email or password');
         }
@@ -204,7 +224,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           body: JSON.stringify(data),
         });
 
-        const json = await res.json();
+        const json = await readApiResponse(res, 'Account registration');
         if (!res.ok || !json.success) {
           throw new Error(json.error || 'Failed to create account');
         }
