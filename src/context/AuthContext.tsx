@@ -162,6 +162,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
     try {
+      await syncServerSupabaseConfig();
       if (password) {
         const res = await fetch('/api/auth/signin', {
           method: 'POST',
@@ -178,8 +179,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         // Store session in Supabase client if returned
-        if (json.session && isSupabaseConfigured && supabase) {
-          await supabase.auth.setSession(json.session);
+        if (json.session) {
+          if (!isSupabaseConfigured || !supabase) {
+            throw new Error('Sign-in succeeded, but the secure session client is not configured. Please refresh and try again.');
+          }
+          const { error: sessionError } = await supabase.auth.setSession(json.session);
+          if (sessionError) throw new Error(`Sign-in succeeded but the session could not be saved: ${sessionError.message}`);
         }
 
         let role: UserRole = 'landlord';
@@ -217,6 +222,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (data: { email: string; fullName: string; role: UserRole; phone: string; password?: string }) => {
     setIsLoading(true);
     try {
+      await syncServerSupabaseConfig();
       if (data.password) {
         const res = await fetch('/api/auth/signup', {
           method: 'POST',
@@ -229,8 +235,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           throw new Error(json.error || 'Failed to create account');
         }
 
-        if (json.session && isSupabaseConfigured && supabase) {
-          await supabase.auth.setSession(json.session);
+        if (json.session) {
+          if (!isSupabaseConfigured || !supabase) {
+            throw new Error('Your account was created, but the secure session client is not configured. Please sign in again after refreshing.');
+          }
+          const { error: sessionError } = await supabase.auth.setSession(json.session);
+          if (sessionError) throw new Error(`Your account was created but automatic sign-in failed: ${sessionError.message}`);
         }
 
         const profile: UserProfile = {
