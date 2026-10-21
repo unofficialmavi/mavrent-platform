@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import http from 'http';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -81,6 +81,24 @@ async function getAuthenticatedUser(req: express.Request) {
     return null;
   }
 }
+
+// API root status endpoint
+app.get('/api', (_req, res) => {
+  res.json({
+    status: 'online',
+    service: 'MavRent Platform API',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.all('/api', (req, res) => {
+  res.setHeader('Allow', 'GET');
+  res.status(405).json({
+    success: false,
+    error: `Method ${req.method} not allowed on /api. Please use GET.`,
+  });
+});
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -174,6 +192,14 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
+app.all('/api/auth/signup', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({
+    success: false,
+    error: `Method ${req.method} not allowed on /api/auth/signup. Please use POST.`,
+  });
+});
+
 app.post('/api/auth/signin', async (req, res) => {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -231,6 +257,14 @@ app.post('/api/auth/signin', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Signin failed' });
   }
+});
+
+app.all('/api/auth/signin', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({
+    success: false,
+    error: `Method ${req.method} not allowed on /api/auth/signin. Please use POST.`,
+  });
 });
 
 // Public rental marketplace: only explicitly published listings are exposed.
@@ -2424,6 +2458,26 @@ app.post('/api/notifications/dispatch', async (req, res) => {
   });
 });
 
+// Catch-all for unmatched /api routes ensuring standard JSON 404 responses
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `API route not found: ${req.method} ${req.path}`,
+  });
+});
+
+// JSON error-handling middleware for API routes
+app.use('/api', (err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Unhandled API exception:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+  });
+});
+
 async function startServer() {
   const httpServer = http.createServer(app);
 
@@ -2449,9 +2503,12 @@ async function startServer() {
   });
 }
 
-// Vercel imports this Express app as a serverless function. Do not start a
-// separate listening server inside the function runtime.
-if (process.env.VERCEL !== '1') {
+// Vercel and serverless handlers import this Express app. Only start
+// the listening HTTP/Vite server when executed directly as entrypoint.
+const isDirectEntry = Boolean(
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+);
+if (isDirectEntry && process.env.VERCEL !== '1') {
   startServer();
 }
 
