@@ -60,6 +60,26 @@ export const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
     })
   : null;
 
+// Role mapping helpers for Supabase database constraints:
+// DB enum 'user_role' supports: 'renter' | 'landlord' | 'agent' | 'admin'
+export function mapRoleToDb(role?: string): 'renter' | 'landlord' | 'agent' | 'admin' {
+  if (!role) return 'landlord';
+  const norm = role.toLowerCase().trim();
+  if (norm === 'tenant' || norm === 'renter') return 'renter';
+  if (norm === 'property_manager' || norm === 'agent') return 'agent';
+  if (norm === 'admin') return 'admin';
+  return 'landlord';
+}
+
+export function mapRoleToApp(role?: string): 'tenant' | 'landlord' | 'property_manager' | 'admin' {
+  if (!role) return 'landlord';
+  const norm = role.toLowerCase().trim();
+  if (norm === 'renter' || norm === 'tenant') return 'tenant';
+  if (norm === 'agent' || norm === 'property_manager') return 'property_manager';
+  if (norm === 'admin') return 'admin';
+  return 'landlord';
+}
+
 // Helper to map property types to database enum: 'apartment' | 'house' | 'room' | 'hostel' | 'studio' | 'office' | 'shop' | 'other'
 function mapPropertyTypeToDb(rawType?: string): string {
   if (!rawType) return 'apartment';
@@ -219,10 +239,10 @@ app.post('/api/auth/signup', async (req, res) => {
       console.warn('[Signup] Tenant lease lookup notice:', (tErr as any)?.message);
     }
 
-    // Insert or update profile with role fallback for diverse Supabase schemas
+    // Insert or update profile with role mapping matching the database enum constraints
     let profileRow: any = null;
-    const preferredRole = cleanRole;
-    const fallbackRole = cleanRole === 'tenant' ? 'renter' : cleanRole;
+    const dbRole = mapRoleToDb(cleanRole);
+    const alternativeRole = cleanRole;
 
     const baseProfileData = {
       id: userId,
@@ -232,22 +252,22 @@ app.post('/api/auth/signup', async (req, res) => {
       updated_at: new Date().toISOString(),
     };
 
-    // Attempt 1: preferred role (e.g. 'tenant' or 'landlord')
+    // Attempt 1: database enum compliant role ('renter' for tenant, 'landlord' for landlord)
     const { data: p1, error: e1 } = await supabaseAdmin
       .from('profiles')
-      .upsert({ ...baseProfileData, role: preferredRole })
+      .upsert({ ...baseProfileData, role: dbRole })
       .select()
       .maybeSingle();
 
     if (!e1 && p1) {
       profileRow = p1;
     } else {
-      console.warn(`[Signup] Profile insert with role '${preferredRole}' returned:`, e1?.message);
-      // Attempt 2: fallback role ('renter') if schema uses legacy enum
-      if (fallbackRole !== preferredRole) {
+      console.warn(`[Signup] Primary profile insert with role '${dbRole}' returned:`, e1?.message);
+      // Attempt 2: alternative role in case the enum was altered
+      if (alternativeRole !== dbRole) {
         const { data: p2, error: e2 } = await supabaseAdmin
           .from('profiles')
-          .upsert({ ...baseProfileData, role: fallbackRole })
+          .upsert({ ...baseProfileData, role: alternativeRole })
           .select()
           .maybeSingle();
         if (!e2 && p2) {
@@ -377,9 +397,9 @@ app.post('/api/auth/signin', async (req, res) => {
         const isTenantRole = Boolean(linkedTenant || metadataRole === 'tenant' || metadataRole === 'renter');
         const fallbackName = sessionData.user.user_metadata?.full_name || cleanEmail.split('@')[0];
 
-        // Attempt repair with 'tenant' or 'landlord'
-        const initialRole = isTenantRole ? 'tenant' : 'landlord';
-        const fallbackRole = isTenantRole ? 'renter' : 'landlord';
+        // Map role to database enum ('renter' for tenant, 'landlord' for landlord)
+        const appRole = isTenantRole ? 'tenant' : 'landlord';
+        const dbRole = mapRoleToDb(appRole);
 
         let { data: newProfile, error: repairError } = await supabaseAdmin
           .from('profiles')
@@ -387,21 +407,21 @@ app.post('/api/auth/signin', async (req, res) => {
             id: sessionData.user.id,
             full_name: fallbackName,
             phone: sessionData.user.phone || null,
-            role: initialRole,
+            role: dbRole,
             tenant_code: linkedTenant?.tenant_code || null,
           })
           .select()
           .maybeSingle();
 
-        if (repairError && fallbackRole !== initialRole) {
-          // Retry with legacy enum 'renter'
+        if (repairError && dbRole !== appRole) {
+          // Retry with alternative role in case schema was changed
           const retryInsert = await supabaseAdmin
             .from('profiles')
             .insert({
               id: sessionData.user.id,
               full_name: fallbackName,
               phone: sessionData.user.phone || null,
-              role: fallbackRole,
+              role: appRole,
               tenant_code: linkedTenant?.tenant_code || null,
             })
             .select()
@@ -428,18 +448,23 @@ app.post('/api/auth/signin', async (req, res) => {
             id: sessionData.user.id,
             full_name: fallbackName,
             phone: sessionData.user.phone || '',
-            role: initialRole,
+            role: appRole,
             tenant_code: linkedTenant?.tenant_code,
           };
         }
       }
     }
 
+    const finalProfile = profile ? {
+      ...profile,
+      role: mapRoleToApp(profile.role),
+    } : null;
+
     return res.json({
       success: true,
       session: sessionData.session,
       user: sessionData.user,
-      profile,
+      profile: finalProfile,
     });
   } catch (err: any) {
     console.error('[Signin Unhandled Error]:', err);
@@ -452,6 +477,33 @@ app.all('/api/auth/signin', (req, res) => {
   res.status(405).json({
     success: false,
     error: `Method ${req.method} not allowed on /api/auth/signin. Please use POST.`,
+  });
+});
+
+app.post('/api/auth/signout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && supabaseAdmin) {
+      const token = authHeader.replace(/^Bearer\s+/i, '');
+      if (token) {
+        try {
+          await supabaseAdmin.auth.admin.signOut(token);
+        } catch {
+          // Token may already be expired or invalid
+        }
+      }
+    }
+    return res.json({ success: true, message: 'Signed out successfully.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Signout failed' });
+  }
+});
+
+app.all('/api/auth/signout', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({
+    success: false,
+    error: `Method ${req.method} not allowed on /api/auth/signout. Please use POST.`,
   });
 });
 
@@ -2671,7 +2723,8 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer } = await import('vite');
+    const vitePkg = 'vite';
+    const { createServer } = await import(vitePkg);
     const vite = await createServer({
       server: {
         middlewareMode: true,

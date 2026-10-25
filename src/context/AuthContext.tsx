@@ -250,11 +250,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    if (isSupabaseConfigured && supabase) {
-      await supabase.auth.signOut();
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (token) {
+          fetch('/api/auth/signout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          }).catch(() => {});
+        }
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn('Signout notice:', err);
+    } finally {
+      setCurrentUser(null);
+      localStorage.removeItem('mavrent_current_user');
     }
-    setCurrentUser(null);
-    localStorage.removeItem('mavrent_current_user');
   };
 
 
