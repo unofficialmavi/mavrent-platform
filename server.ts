@@ -15,6 +15,15 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Vercel's Node runtime may pre-parse JSON bodies before invoking this Express app.
+// Mark those requests as already parsed so body-parser does not attempt to consume
+// a request stream that is no longer readable.
+app.use((req: any, _res, next) => {
+  if (req.body !== undefined && req.body !== null && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    req._body = true;
+  }
+  next();
+});
 app.use(express.json());
 
 // Initialize Google Gemini on the server side (API key never exposed to browser)
@@ -31,12 +40,12 @@ const ai = apiKey
   : null;
 
 // Initialize Supabase Admin client on the server side (Protected Service Role)
-const rawUrl = process.env.VITE_SUPABASE_URL || '';
+const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const supabaseUrl = rawUrl.startsWith('http')
   ? rawUrl
   : rawUrl ? `https://${rawUrl}.supabase.co` : '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey, {
@@ -132,7 +141,7 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 
     const userId = authData.user.id;
-    const dbRole = role === 'tenant' ? 'renter' : 'landlord';
+    const dbRole = role === 'tenant' ? 'tenant' : 'landlord';
 
     // Ensure the profile exists before reporting success. A missing profile
     // makes authentication appear successful while the app cannot load a role.
@@ -240,7 +249,7 @@ app.post('/api/auth/signin', async (req, res) => {
       } else {
         // Repair older accounts that exist in Supabase Auth but lack a profile.
         const metadataRole = user.user_metadata?.role;
-        const dbRole = metadataRole === 'tenant' || metadataRole === 'renter' ? 'renter' : 'landlord';
+        const dbRole = metadataRole === 'tenant' || metadataRole === 'renter' ? 'tenant' : 'landlord';
         const { data: repairedProfile, error: repairError } = await supabaseAdmin
           .from('profiles')
           .upsert({
