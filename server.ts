@@ -148,7 +148,7 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 
     const userId = authData.user.id;
-    const dbRole = role === 'tenant' ? 'tenant' : 'landlord';
+    const dbRole = role === 'tenant' ? 'renter' : 'landlord';
 
     // Ensure the profile exists before reporting success. A missing profile
     // makes authentication appear successful while the app cannot load a role.
@@ -256,7 +256,7 @@ app.post('/api/auth/signin', async (req, res) => {
       } else {
         // Repair older accounts that exist in Supabase Auth but lack a profile.
         const metadataRole = user.user_metadata?.role;
-        const dbRole = metadataRole === 'tenant' || metadataRole === 'renter' ? 'tenant' : 'landlord';
+        const dbRole = metadataRole === 'tenant' || metadataRole === 'renter' ? 'renter' : 'landlord';
         const { data: repairedProfile, error: repairError } = await supabaseAdmin
           .from('profiles')
           .upsert({
