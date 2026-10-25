@@ -332,7 +332,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (err: any) {
       console.warn('Portfolio sync warning:', err);
       if (isMountedRef.current) {
-        setSyncError(err.message || 'Could not synchronize with Supabase.');
+        setSyncError(err.message || 'Could not synchronize with cloud rental ledger.');
       }
     } finally {
       if (isMountedRef.current) {
@@ -409,7 +409,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.error || 'Failed to save property to Supabase');
+      throw new Error(err.error || 'Failed to save property');
     }
 
     const json = await res.json();
@@ -446,7 +446,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Failed to update property in Supabase');
+        throw new Error(err.error || 'Failed to update property');
       }
     } catch (err: any) {
       // Rollback on failure
@@ -464,7 +464,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = await authFetch(`/api/data/properties/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Failed to delete property from Supabase');
+        throw new Error(err.error || 'Failed to delete property');
       }
     } catch (err: any) {
       setProperties(previous);
@@ -492,7 +492,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.error || 'Failed to save unit to Supabase');
+      throw new Error(err.error || 'Failed to save unit');
     }
 
     const json = await res.json();
@@ -544,7 +544,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Failed to update unit in Supabase');
+        throw new Error(err.error || 'Failed to update unit');
       }
     } catch (err: any) {
       setProperties(previous);
@@ -594,7 +594,7 @@ export const PropertyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const res = await authFetch(`/api/data/units/${unitId}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || 'Failed to delete unit from Supabase');
+        throw new Error(err.error || 'Failed to delete unit');
       }
     } catch (err: any) {
       setProperties(previous);

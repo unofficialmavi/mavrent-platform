@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile, UserRole } from '../types';
-import { supabase, isSupabaseConfigured, syncServerSupabaseConfig } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, getOrInitSupabase } from '../lib/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 interface AuthContextType {
   currentUser: UserProfile | null;
@@ -15,128 +16,124 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('mavrent_current_user');
+        return cached ? JSON.parse(cached) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Helper to extract authoritative user profile without dropping legitimate sessions
+  const resolveUserProfile = async (client: SupabaseClient, user: any): Promise<UserProfile> => {
+    let mappedRole: UserRole = 'landlord';
+    let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+    let phone = user.phone || '';
+    let tenantCode: string | undefined;
+
+    try {
+      const { data: prof } = await client.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      if (prof) {
+        if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
+        else if (prof.role === 'agent') mappedRole = 'property_manager';
+        else if (prof.role === 'admin') mappedRole = 'admin';
+        else if (prof.role === 'landlord') mappedRole = 'landlord';
+        if (prof.full_name) fullName = prof.full_name;
+        if (prof.phone) phone = prof.phone;
+        if (prof.tenant_code) tenantCode = prof.tenant_code;
+      } else {
+        const metaRole = user.user_metadata?.role;
+        mappedRole = metaRole === 'tenant' ? 'tenant' : 'landlord';
+      }
+
+      if (mappedRole === 'tenant' && !tenantCode) {
+        const { data: ten } = await client
+          .from('tenants')
+          .select('tenant_code')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        if (ten?.tenant_code) tenantCode = ten.tenant_code;
+      }
+    } catch (err) {
+      console.warn('Profile read fallback to session metadata:', err);
+      const metaRole = user.user_metadata?.role;
+      mappedRole = metaRole === 'tenant' ? 'tenant' : 'landlord';
+    }
+
+    return {
+      id: user.id,
+      role: mappedRole,
+      fullName,
+      phone,
+      email: user.email || '',
+      tenantCode,
+      createdAt: user.created_at || new Date().toISOString(),
+    };
+  };
 
   // Sync with live Supabase session on mount
   useEffect(() => {
     let isMounted = true;
+    let authSubscription: { unsubscribe: () => void } | null = null;
 
-    async function checkSession() {
+    async function initAuth() {
       try {
-        await syncServerSupabaseConfig();
+        const client = await getOrInitSupabase();
+        if (!client || !isMounted) {
+          setIsLoading(false);
+          return;
+        }
 
-        if (isSupabaseConfigured && supabase) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user && isMounted) {
-            const user = session.user;
-            // Fetch profile record from Supabase
-            let mappedRole: UserRole = 'landlord';
-            let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-            let phone = user.phone || '';
-            let tenantCode: string | undefined;
-
-            try {
-              const { data: prof, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-              if (profileError) throw profileError;
-              if (!prof) {
-                await supabase.auth.signOut();
-                if (isMounted) setCurrentUser(null);
-                localStorage.removeItem('mavrent_current_user');
-                return;
-              }
-              if (prof) {
-                if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
-                else if (prof.role === 'agent') mappedRole = 'property_manager';
-                else if (prof.role === 'admin') mappedRole = 'admin';
-                else if (prof.role === 'landlord') mappedRole = 'landlord';
-                if (prof.full_name) fullName = prof.full_name;
-                if (prof.phone) phone = prof.phone;
-                if (prof.tenant_code) tenantCode = prof.tenant_code;
-              }
-
-              if (mappedRole === 'tenant' && !tenantCode) {
-                const { data: ten } = await supabase.from('tenants').select('tenant_code').eq('user_id', user.id).limit(1).maybeSingle();
-                if (ten?.tenant_code) tenantCode = ten.tenant_code;
-              }
-            } catch (pErr) {
-              console.warn('Profile lookup failed; refusing to create a local demo session.', pErr);
-              if (isMounted) setCurrentUser(null);
-              localStorage.removeItem('mavrent_current_user');
-              return;
-            }
-
-            const profile: UserProfile = {
-              id: user.id,
-              role: mappedRole,
-              fullName,
-              phone,
-              email: user.email || '',
-              tenantCode,
-              createdAt: user.created_at,
-            };
+        // 1. Check existing session
+        const { data: { session } } = await client.auth.getSession();
+        if (session?.user && isMounted) {
+          const profile = await resolveUserProfile(client, session.user);
+          if (isMounted) {
             setCurrentUser(profile);
             localStorage.setItem('mavrent_current_user', JSON.stringify(profile));
           }
+        } else if (!session && isMounted) {
+          setCurrentUser(null);
+          localStorage.removeItem('mavrent_current_user');
         }
+
+        // 2. Set up reactive auth state change listener
+        const { data: { subscription } } = client.auth.onAuthStateChange(async (_event, newSession) => {
+          if (!isMounted) return;
+          if (newSession?.user) {
+            const profile = await resolveUserProfile(client, newSession.user);
+            if (isMounted) {
+              setCurrentUser(profile);
+              localStorage.setItem('mavrent_current_user', JSON.stringify(profile));
+            }
+          } else {
+            setCurrentUser(null);
+            localStorage.removeItem('mavrent_current_user');
+          }
+        });
+        authSubscription = subscription;
       } catch (err) {
-        console.warn('Session check warning:', err);
+        console.warn('Auth initialization warning:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
     }
 
-    checkSession();
+    initAuth();
 
-    if (isSupabaseConfigured && supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user && isMounted) {
-          const user = session.user;
-          let mappedRole: UserRole = 'landlord';
-          let fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-          let phone = user.phone || '';
-          let tenantCode: string | undefined;
-
-          if (supabase) {
-            try {
-              const { data: prof, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-              if (profileError || !prof) {
-                setCurrentUser(null);
-                localStorage.removeItem('mavrent_current_user');
-                return;
-              }
-              if (prof) {
-                if (prof.role === 'renter' || prof.role === 'tenant') mappedRole = 'tenant';
-                else if (prof.role === 'agent') mappedRole = 'property_manager';
-                else if (prof.role === 'admin') mappedRole = 'admin';
-                else if (prof.role === 'landlord') mappedRole = 'landlord';
-                if (prof.full_name) fullName = prof.full_name;
-                if (prof.phone) phone = prof.phone;
-                if (prof.tenant_code) tenantCode = prof.tenant_code;
-              }
-            } catch {}
-          }
-
-          const profile: UserProfile = {
-            id: user.id,
-            role: mappedRole,
-            fullName,
-            phone,
-            email: user.email || '',
-            tenantCode,
-            createdAt: user.created_at,
-          };
-          setCurrentUser(profile);
-          localStorage.setItem('mavrent_current_user', JSON.stringify(profile));
-        }
-      });
-
-      return () => {
-        isMounted = false;
-        subscription.unsubscribe();
-      };
-    }
+    return () => {
+      isMounted = false;
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
+    };
   }, []);
 
   const login = async (email: string, password?: string) => {
@@ -214,7 +211,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           json = await res.json();
         } catch {
-          throw new Error(`Registration server returned HTTP ${res.status}. Expected JSON response.`);
+          const rawText = await res.text().catch(() => '');
+          throw new Error(rawText || `Registration server returned HTTP ${res.status}. Expected JSON response.`);
         }
 
         if (!res.ok || !json.success) {
@@ -223,14 +221,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (json.session && isSupabaseConfigured && supabase) {
           await supabase.auth.setSession(json.session);
+        } else if (!json.session && data.password) {
+          // If server did not return a session, sign in directly with credentials
+          return await login(data.email, data.password);
         }
 
         const profile: UserProfile = {
-          id: json.user.id,
-          role: data.role,
-          fullName: data.fullName,
-          phone: data.phone,
-          email: data.email,
+          id: json.user?.id || json.profile?.id,
+          role: json.profile?.role === 'renter' || json.profile?.role === 'tenant' ? 'tenant' : (json.profile?.role || data.role),
+          fullName: json.profile?.fullName || json.profile?.full_name || data.fullName,
+          phone: json.profile?.phone || data.phone,
+          email: json.profile?.email || data.email,
+          tenantCode: json.profile?.tenantCode || json.profile?.tenant_code,
           createdAt: new Date().toISOString(),
         };
 

@@ -15,6 +15,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Serverless body parser bridge: if req.body is already populated (e.g. Vercel serverless runtime),
+// set req._body = true so express.json() / body-parser does not re-read the consumed stream.
+app.use((req, _res, next) => {
+  if (req.body !== undefined && req.body !== null) {
+    (req as any)._body = true;
+    if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch {
+        // preserve as string
+      }
+    }
+  }
+  next();
+});
+
 app.use(express.json());
 
 // Initialize Google Gemini on the server side (API key never exposed to browser)
@@ -31,12 +47,12 @@ const ai = apiKey
   : null;
 
 // Initialize Supabase Admin client on the server side (Protected Service Role)
-const rawUrl = process.env.VITE_SUPABASE_URL || '';
+const rawUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
 const supabaseUrl = rawUrl.startsWith('http')
   ? rawUrl
   : rawUrl ? `https://${rawUrl}.supabase.co` : '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '').trim();
+const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey, {
@@ -120,6 +136,14 @@ app.get('/api/config/supabase', (req, res) => {
   });
 });
 
+app.all('/api/config/supabase', (req, res) => {
+  res.setHeader('Allow', 'GET');
+  res.status(405).json({
+    success: false,
+    error: `Method ${req.method} not allowed on /api/config/supabase. Please use GET.`,
+  });
+});
+
 // =========================================================================
 // AUTHENTICATION ROUTES (Real Supabase Auth with Server Safeguards)
 // =========================================================================
@@ -127,68 +151,160 @@ app.get('/api/config/supabase', (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
   try {
     if (!supabaseAdmin) {
-      return res.status(503).json({ error: 'Supabase admin is not configured.' });
+      return res.status(503).json({
+        success: false,
+        error: 'Rental authentication service is not configured. Server credentials required.',
+      });
     }
-    const { email, password, fullName, phone, role } = req.body;
+    const { email, password, fullName, phone, role } = req.body || {};
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      return res.status(400).json({ success: false, error: 'Email and password are required.' });
+    }
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters long.' });
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (typeof email !== 'string' || !emailRegex.test(email.trim())) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
     }
     if (role && role !== 'landlord' && role !== 'tenant') {
-      return res.status(400).json({ error: 'Public sign-up supports landlord or tenant accounts only.' });
+      return res.status(400).json({ success: false, error: 'Public sign-up supports landlord or tenant accounts only.' });
     }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanRole = role || 'landlord';
 
     // Create user in Supabase auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: cleanEmail,
       password,
       email_confirm: true, // Auto-confirm email for frictionless SaaS verification
-      user_metadata: { full_name: fullName, role: role || 'landlord' },
+      user_metadata: { full_name: fullName || '', role: cleanRole },
     });
 
     if (authError) {
-      return res.status(400).json({ error: authError.message });
+      console.warn('[Signup Auth Warning]', authError.message);
+      if (authError.message?.toLowerCase().includes('already') || (authError as any).status === 422) {
+        return res.status(409).json({
+          success: false,
+          error: 'An account with this email address already exists. Please sign in instead.',
+        });
+      }
+      return res.status(400).json({ success: false, error: authError.message });
     }
 
-    const userId = authData.user.id;
-    const dbRole = role === 'tenant' ? 'renter' : 'landlord';
-
-    // Insert or update profile
-    await supabaseAdmin.from('profiles').upsert({
-      id: userId,
-      full_name: fullName || '',
-      phone: phone || null,
-      role: dbRole,
-    });
-
-    // Create a session for client
-    const anonClient = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: sessionData, error: sessionError } = await anonClient.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (sessionError) {
-      return res.json({
-        success: true,
-        user: authData.user,
-        message: 'Account created. Please sign in.',
+    if (!authData || !authData.user) {
+      return res.status(502).json({
+        success: false,
+        error: 'Authentication provider did not return a valid user object.',
       });
     }
 
-    res.json({
+    const userId = authData.user.id;
+
+    // Check if this email is already a tenant with a lease code
+    let tenantCode: string | null = null;
+    let existingTenantId: string | null = null;
+    try {
+      const { data: existingTenant } = await supabaseAdmin
+        .from('tenants')
+        .select('id, tenant_code')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
+      if (existingTenant) {
+        tenantCode = existingTenant.tenant_code || null;
+        existingTenantId = existingTenant.id || null;
+      }
+    } catch (tErr) {
+      console.warn('[Signup] Tenant lease lookup notice:', (tErr as any)?.message);
+    }
+
+    // Insert or update profile with role fallback for diverse Supabase schemas
+    let profileRow: any = null;
+    const preferredRole = cleanRole;
+    const fallbackRole = cleanRole === 'tenant' ? 'renter' : cleanRole;
+
+    const baseProfileData = {
+      id: userId,
+      full_name: fullName || '',
+      phone: phone || null,
+      tenant_code: tenantCode,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Attempt 1: preferred role (e.g. 'tenant' or 'landlord')
+    const { data: p1, error: e1 } = await supabaseAdmin
+      .from('profiles')
+      .upsert({ ...baseProfileData, role: preferredRole })
+      .select()
+      .maybeSingle();
+
+    if (!e1 && p1) {
+      profileRow = p1;
+    } else {
+      console.warn(`[Signup] Profile insert with role '${preferredRole}' returned:`, e1?.message);
+      // Attempt 2: fallback role ('renter') if schema uses legacy enum
+      if (fallbackRole !== preferredRole) {
+        const { data: p2, error: e2 } = await supabaseAdmin
+          .from('profiles')
+          .upsert({ ...baseProfileData, role: fallbackRole })
+          .select()
+          .maybeSingle();
+        if (!e2 && p2) {
+          profileRow = p2;
+        } else if (e2) {
+          console.warn('[Signup] Fallback profile insert also returned:', e2.message);
+        }
+      }
+    }
+
+    // Link tenant record to user_id if lease exists
+    if (existingTenantId) {
+      try {
+        await supabaseAdmin.from('tenants').update({ user_id: userId }).eq('id', existingTenantId);
+      } catch (linkErr) {
+        console.warn('[Signup] Tenant link notice:', (linkErr as any)?.message);
+      }
+    }
+
+    // Attempt to establish session for immediate client login
+    let sessionData: any = null;
+    if (supabaseUrl && supabaseAnonKey) {
+      try {
+        const anonClient = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false },
+        });
+        const { data: sData, error: sError } = await anonClient.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+        if (!sError && sData?.session) {
+          sessionData = sData;
+        }
+      } catch (anonErr) {
+        console.warn('[Signup] Session auto-login skipped:', (anonErr as any)?.message);
+      }
+    }
+
+    return res.status(201).json({
       success: true,
-      session: sessionData.session,
-      user: sessionData.user,
+      session: sessionData?.session || null,
+      user: sessionData?.user || authData.user,
       profile: {
         id: userId,
-        fullName,
-        email,
-        phone,
-        role: role || 'landlord',
+        fullName: profileRow?.full_name || fullName || '',
+        email: cleanEmail,
+        phone: profileRow?.phone || phone || '',
+        role: cleanRole,
+        tenantCode: tenantCode || undefined,
       },
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Signup failed' });
+    console.error('[Signup Unhandled Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Signup failed',
+    });
   }
 });
 
@@ -203,59 +319,131 @@ app.all('/api/auth/signup', (req, res) => {
 app.post('/api/auth/signin', async (req, res) => {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
-      return res.status(503).json({ error: 'Supabase is not configured.' });
+      return res.status(503).json({ success: false, error: 'Supabase credentials are not configured.' });
     }
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
+      return res.status(400).json({ success: false, error: 'Email and password are required.' });
     }
 
-    const anonClient = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: sessionData, error: sessionError } = await anonClient.auth.signInWithPassword({
-      email,
+    const cleanEmail = String(email).trim().toLowerCase();
+    const anonClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+    let { data: sessionData, error: sessionError } = await anonClient.auth.signInWithPassword({
+      email: cleanEmail,
       password,
     });
 
     if (sessionError) {
       // If error is email_not_confirmed, auto-confirm via admin and retry
       if (sessionError.message.includes('Email not confirmed') && supabaseAdmin) {
-        const { data: users } = await supabaseAdmin.auth.admin.listUsers();
-        const target = users?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-        if (target) {
-          await supabaseAdmin.auth.admin.updateUserById(target.id, { email_confirm: true });
-          const retry = await anonClient.auth.signInWithPassword({ email, password });
-          if (!retry.error) {
-            let prof = null;
-            if (supabaseAdmin) {
-              const { data: p } = await supabaseAdmin.from('profiles').select('*').eq('id', target.id).single();
-              prof = p;
+        try {
+          const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+          const target = users?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+          if (target) {
+            await supabaseAdmin.auth.admin.updateUserById(target.id, { email_confirm: true });
+            const retry = await anonClient.auth.signInWithPassword({ email: cleanEmail, password });
+            if (!retry.error && retry.data) {
+              sessionData = retry.data;
+              sessionError = null;
             }
-            return res.json({
-              success: true,
-              session: retry.data.session,
-              user: retry.data.user,
-              profile: prof,
-            });
           }
+        } catch (confirmErr) {
+          console.warn('[Signin Auto-Confirm Warning]:', (confirmErr as any)?.message);
         }
       }
-      return res.status(401).json({ error: sessionError.message });
+      if (sessionError) {
+        return res.status(401).json({ success: false, error: sessionError.message });
+      }
     }
 
-    let profile = null;
-    if (supabaseAdmin && sessionData.user) {
-      const { data: p } = await supabaseAdmin.from('profiles').select('*').eq('id', sessionData.user.id).single();
-      profile = p;
+    if (!sessionData?.user) {
+      return res.status(401).json({ success: false, error: 'Sign in succeeded but no user session was returned.' });
     }
 
-    res.json({
+    let profile: any = null;
+    if (supabaseAdmin) {
+      const { data: p } = await supabaseAdmin.from('profiles').select('*').eq('id', sessionData.user.id).maybeSingle();
+      if (p) {
+        profile = p;
+      } else {
+        // Safe profile repair: Auth user exists, but profile row was never created
+        const metadataRole = sessionData.user.user_metadata?.role;
+        const { data: linkedTenant } = await supabaseAdmin
+          .from('tenants')
+          .select('tenant_code, id')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+
+        const isTenantRole = Boolean(linkedTenant || metadataRole === 'tenant' || metadataRole === 'renter');
+        const fallbackName = sessionData.user.user_metadata?.full_name || cleanEmail.split('@')[0];
+
+        // Attempt repair with 'tenant' or 'landlord'
+        const initialRole = isTenantRole ? 'tenant' : 'landlord';
+        const fallbackRole = isTenantRole ? 'renter' : 'landlord';
+
+        let { data: newProfile, error: repairError } = await supabaseAdmin
+          .from('profiles')
+          .insert({
+            id: sessionData.user.id,
+            full_name: fallbackName,
+            phone: sessionData.user.phone || null,
+            role: initialRole,
+            tenant_code: linkedTenant?.tenant_code || null,
+          })
+          .select()
+          .maybeSingle();
+
+        if (repairError && fallbackRole !== initialRole) {
+          // Retry with legacy enum 'renter'
+          const retryInsert = await supabaseAdmin
+            .from('profiles')
+            .insert({
+              id: sessionData.user.id,
+              full_name: fallbackName,
+              phone: sessionData.user.phone || null,
+              role: fallbackRole,
+              tenant_code: linkedTenant?.tenant_code || null,
+            })
+            .select()
+            .maybeSingle();
+          if (!retryInsert.error && retryInsert.data) {
+            newProfile = retryInsert.data;
+            repairError = null;
+          }
+        }
+
+        if (!repairError && newProfile) {
+          profile = newProfile;
+          if (linkedTenant) {
+            try {
+              await supabaseAdmin.from('tenants').update({ user_id: sessionData.user.id }).eq('id', linkedTenant.id);
+            } catch (tLinkErr) {
+              console.warn('[Signin] Tenant lease link warning:', (tLinkErr as any)?.message);
+            }
+          }
+          console.log(`[Auth Recovery] Repaired missing profile for user ${sessionData.user.id} with role ${profile.role}`);
+        } else {
+          // If insert still failed, construct a fallback profile object so login can proceed safely
+          profile = {
+            id: sessionData.user.id,
+            full_name: fallbackName,
+            phone: sessionData.user.phone || '',
+            role: initialRole,
+            tenant_code: linkedTenant?.tenant_code,
+          };
+        }
+      }
+    }
+
+    return res.json({
       success: true,
       session: sessionData.session,
       user: sessionData.user,
       profile,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Signin failed' });
+    console.error('[Signin Unhandled Error]:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Signin failed' });
   }
 });
 
@@ -2466,13 +2654,14 @@ app.all('/api/*', (req, res) => {
   });
 });
 
-// JSON error-handling middleware for API routes
-app.use('/api', (err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled API exception:', err);
+// Global JSON error-handling middleware for all API and serverless requests
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[Unhandled API Exception]', req.method, req.originalUrl || req.url, err);
   if (res.headersSent) {
     return next(err);
   }
-  res.status(err.status || 500).json({
+  const status = Number(err.status || err.statusCode) || 500;
+  res.status(status).json({
     success: false,
     error: err.message || 'Internal Server Error',
   });

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/concurrency_audit_simulation.ts && tsx scripts/tenant_otp_unit_tests.ts && tsx scripts/marketplace_reservations_unit_tests.ts"
+    "test": "tsx scripts/concurrency_audit_simulation.ts && tsx scripts/tenant_otp_unit_tests.ts && tsx scripts/marketplace_reservations_unit_tests.ts && tsx scripts/auth_registration_unit_tests.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useProperty } from '../../context/PropertyContext';
+import { supabase } from '../../lib/supabase';
 import { ProposedAiAction } from '../../types';
 
 interface Message {
@@ -140,9 +141,15 @@ export const MavAiDrawer: React.FC<MavAiDrawerProps> = ({ isOpen, onClose }) => 
     setLoading(true);
 
     try {
+      const session = (await supabase?.auth.getSession())?.data.session;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch('/api/gemini/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           prompt: userPrompt,
           role,

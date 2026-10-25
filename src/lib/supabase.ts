@@ -71,24 +71,40 @@ if (isSupabaseConfigured) {
   initSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
+let initPromise: Promise<SupabaseClient | null> | null = null;
+
+// Synchronize and return guaranteed SupabaseClient instance
+export async function getOrInitSupabase(): Promise<SupabaseClient | null> {
+  if (isSupabaseConfigured && supabase) return supabase;
+  if (!initPromise) {
+    initPromise = (async () => {
+      if (isSupabaseConfigured && supabase) return supabase;
+      const initialClient = initSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      if (initialClient) return initialClient;
+
+      try {
+        const res = await fetch('/api/config/supabase');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.configured && data.url && data.anonKey) {
+            return initSupabaseClient(data.url, data.anonKey);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not auto-sync Supabase config from /api/config/supabase:', err);
+      }
+      return null;
+    })().finally(() => {
+      initPromise = null;
+    });
+  }
+  return initPromise;
+}
+
 // Auto-discover config from server endpoint if client environment lacks it
 export async function syncServerSupabaseConfig(): Promise<boolean> {
-  if (isSupabaseConfigured && supabase) return true;
-  try {
-    const res = await fetch('/api/config/supabase');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.configured && data.url && data.anonKey) {
-        const client = initSupabaseClient(data.url, data.anonKey);
-        if (client) {
-          return true;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Could not fetch server supabase config:', err);
-  }
-  return false;
+  const client = await getOrInitSupabase();
+  return Boolean(client);
 }
 
 export function saveSupabaseConfig(url: string, key: string) {
