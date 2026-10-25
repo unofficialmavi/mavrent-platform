@@ -117,8 +117,15 @@ app.get('/api/config/supabase', (req, res) => {
 
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    if (!supabaseAdmin) {
-      return res.status(503).json({ error: 'Supabase admin is not configured.' });
+    // Require both admin and public Auth configuration before creating any user.
+    // Otherwise signup could create an Auth user and then fail while creating a session.
+    if (!supabaseAdmin || !supabaseUrl || !supabaseAnonKey) {
+      console.error('Signup unavailable: required Supabase server configuration is missing.', {
+        adminConfigured: !!supabaseAdmin,
+        urlConfigured: !!supabaseUrl,
+        anonKeyConfigured: !!supabaseAnonKey,
+      });
+      return res.status(503).json({ success: false, error: 'Account services are not fully configured. Please try again later.' });
     }
     const { email, password, fullName, phone, role } = req.body;
     if (!email || !password) {
@@ -2472,6 +2479,26 @@ app.post('/api/notifications/dispatch', async (req, res) => {
     channel,
     status: 'queued',
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Final API error boundary. This must be after the routes so it catches errors
+// from JSON parsing and route handlers, and it must never leak stack traces/secrets.
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(err);
+  const status = Number(err?.status || err?.statusCode || 500);
+  const safeStatus = status >= 400 && status < 600 ? status : 500;
+  if (safeStatus >= 500) {
+    console.error('Unhandled API error:', {
+      path: req.path,
+      method: req.method,
+      message: err?.message || 'Unknown server error',
+      type: err?.type,
+    });
+  }
+  res.status(safeStatus).json({
+    success: false,
+    error: safeStatus >= 500 ? 'The server could not complete the request. Please try again.' : (err?.message || 'Invalid request.'),
   });
 });
 
