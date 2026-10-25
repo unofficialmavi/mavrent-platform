@@ -1,0 +1,14 @@
+import app from '../server';
+
+// Normalize file-based Vercel function URLs before dispatching to Express.
+export function invokeExpress(req: any, res: any, routePath: string) {
+  const rawUrl = typeof req.url === 'string' ? req.url : '';
+  const query = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
+  req.url = routePath + query;
+  // The Vercel Node adapter can supply an already-parsed body while the
+  // original request stream is no longer readable by Express body-parser.
+  if (req.body !== undefined && req.body !== null && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    req._body = true;
+  }
+  return (app as unknown as (request: any, response: any) => unknown)(req, res);
+}
